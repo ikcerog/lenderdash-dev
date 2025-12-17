@@ -16,15 +16,69 @@ st.set_page_config(page_title="Mortgage & Media Intelligence", layout="wide", in
 MAX_ENTRIES_PER_FEED = 10
 MAX_FRED_DAYS = 365  # Limit FRED data to 1 year for efficiency
 
-st.markdown("""
+# --- SESSION STATE INITIALIZATION ---
+# Theme persistence (uses query params for cross-page-load persistence)
+if 'theme' not in st.session_state:
+    st.session_state.theme = st.query_params.get('theme', 'dark')
+
+# Chart line visibility toggles
+if 'show_30y' not in st.session_state:
+    st.session_state.show_30y = True
+if 'show_15y' not in st.session_state:
+    st.session_state.show_15y = True
+if 'show_10y' not in st.session_state:
+    st.session_state.show_10y = True
+if 'show_rkt' not in st.session_state:
+    st.session_state.show_rkt = True
+
+# Expand/collapse state for sections
+if 'expand_journalists' not in st.session_state:
+    st.session_state.expand_journalists = False
+if 'expand_podcasts' not in st.session_state:
+    st.session_state.expand_podcasts = False
+
+# --- THEME DEFINITIONS ---
+THEMES = {
+    'light': {
+        'bg': '#ffffff',
+        'text': '#000000',
+        'card_bg': '#f0f0f0',
+        'border': '#cccccc',
+        'summary': '#555555',
+        'plotly': 'plotly_white'
+    },
+    'dark': {
+        'bg': '#0e1117',
+        'text': '#fafafa',
+        'card_bg': '#1e1e1e',
+        'border': '#333333',
+        'summary': '#aaaaaa',
+        'plotly': 'plotly_dark'
+    },
+    'midnight': {
+        'bg': '#0a0a12',
+        'text': '#e0e0ff',
+        'card_bg': '#12121f',
+        'border': '#252540',
+        'summary': '#8888aa',
+        'plotly': 'plotly_dark'
+    }
+}
+
+theme = THEMES[st.session_state.theme]
+
+st.markdown(f"""
     <style>
-    .stMetric { background-color: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #333; }
-    .stExpander { border: 1px solid #444 !important; }
-    .stExpander p { word-break: break-all; }
-    .episode-summary { font-size: 0.85em; color: #aaa; margin-top: 4px; margin-bottom: 8px; }
+    .stApp {{ background-color: {theme['bg']}; }}
+    .stMetric {{ background-color: {theme['card_bg']}; padding: 10px; border-radius: 5px; border: 1px solid {theme['border']}; cursor: pointer; transition: opacity 0.2s; }}
+    .stMetric:hover {{ opacity: 0.8; }}
+    .metric-hidden {{ opacity: 0.4; }}
+    .stExpander {{ border: 1px solid {theme['border']} !important; }}
+    .stExpander p {{ word-break: break-all; }}
+    .episode-summary {{ font-size: 0.85em; color: {theme['summary']}; margin-top: 4px; margin-bottom: 8px; }}
     /* Loading indicator - prominent pulsing animation */
-    .stSpinner > div { border-color: #4CAF50 transparent transparent transparent !important; }
-    .loading-banner {
+    .stSpinner > div {{ border-color: #4CAF50 transparent transparent transparent !important; }}
+    .loading-banner {{
         background: linear-gradient(90deg, #1a1a2e, #16213e, #1a1a2e);
         background-size: 200% 100%;
         animation: shimmer 1.5s infinite;
@@ -33,13 +87,29 @@ st.markdown("""
         border: 1px solid #4CAF50;
         margin-bottom: 16px;
         text-align: center;
-    }
-    @keyframes shimmer {
-        0% { background-position: -200% 0; }
-        100% { background-position: 200% 0; }
-    }
+    }}
+    @keyframes shimmer {{
+        0% {{ background-position: -200% 0; }}
+        100% {{ background-position: 200% 0; }}
+    }}
     </style>
 """, unsafe_allow_html=True)
+
+# --- SIDEBAR: Theme Toggle ---
+st.sidebar.title("⚙️ Settings")
+theme_choice = st.sidebar.radio(
+    "Theme",
+    options=['light', 'dark', 'midnight'],
+    index=['light', 'dark', 'midnight'].index(st.session_state.theme),
+    horizontal=True,
+    key='theme_selector'
+)
+if theme_choice != st.session_state.theme:
+    st.session_state.theme = theme_choice
+    st.query_params['theme'] = theme_choice
+    st.rerun()
+
+st.sidebar.markdown("---")
 
 st.title("🏦 Mortgage & Media Command Center")
 
@@ -73,7 +143,7 @@ def get_mortgage_data():
 def get_rkt_stock_data():
     """Fetch RKT stock price from Alpha Vantage (free API)."""
     # Get free API key at: https://www.alphavantage.co/support/#api-key
-    API_KEY = "RLVMLTHDYZJU7SUI"  # Replace with your free Alpha Vantage API key
+    API_KEY = "demo"  # Replace with your free Alpha Vantage API key
     headers = {"User-Agent": "Mozilla/5.0"}
     url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=RKT&apikey={API_KEY}&datatype=csv"
     try:
@@ -226,38 +296,63 @@ data = get_mortgage_data()
 rkt_data = get_rkt_stock_data()
 
 if not data.empty:
-    # Metrics row - add RKT
-    m1, m2, m3, m4 = st.columns(4)
     curr, prev = data.iloc[-1], data.iloc[-2]
-    m1.metric("30Y Fixed", f"{curr['30Y Fixed']}%", f"{round(curr['30Y Fixed']-prev['30Y Fixed'], 3)}%")
-    m2.metric("15Y Fixed", f"{curr['15Y Fixed']}%", f"{round(curr['15Y Fixed']-prev['15Y Fixed'], 3)}%")
-    m3.metric("10Y Treasury", f"{curr['10Y Treasury']}%", f"{round(curr['10Y Treasury']-prev['10Y Treasury'], 3)}%")
-    if not rkt_data.empty and len(rkt_data) >= 2:
-        rkt_curr, rkt_prev = rkt_data.iloc[-1]['RKT'], rkt_data.iloc[-2]['RKT']
-        m4.metric("RKT", f"${rkt_curr:.2f}", f"{rkt_curr - rkt_prev:.2f}")
-    else:
-        m4.metric("RKT", "N/A", "")
+
+    # Metrics row with toggle buttons - click to show/hide on chart
+    st.caption("💡 Click metrics below to show/hide lines on chart")
+    m1, m2, m3, m4 = st.columns(4)
+
+    with m1:
+        label_30y = "30Y Fixed" + (" ✓" if st.session_state.show_30y else " ○")
+        if st.button(f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)", key="btn_30y", use_container_width=True):
+            st.session_state.show_30y = not st.session_state.show_30y
+            st.rerun()
+
+    with m2:
+        label_15y = "15Y Fixed" + (" ✓" if st.session_state.show_15y else " ○")
+        if st.button(f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)", key="btn_15y", use_container_width=True):
+            st.session_state.show_15y = not st.session_state.show_15y
+            st.rerun()
+
+    with m3:
+        label_10y = "10Y Treasury" + (" ✓" if st.session_state.show_10y else " ○")
+        if st.button(f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)", key="btn_10y", use_container_width=True):
+            st.session_state.show_10y = not st.session_state.show_10y
+            st.rerun()
+
+    with m4:
+        label_rkt = "RKT" + (" ✓" if st.session_state.show_rkt else " ○")
+        if not rkt_data.empty and len(rkt_data) >= 2:
+            rkt_curr, rkt_prev = rkt_data.iloc[-1]['RKT'], rkt_data.iloc[-2]['RKT']
+            if st.button(f"**{label_rkt}**\n\n${rkt_curr:.2f} ({rkt_curr - rkt_prev:+.2f})", key="btn_rkt", use_container_width=True):
+                st.session_state.show_rkt = not st.session_state.show_rkt
+                st.rerun()
+        else:
+            st.button(f"**{label_rkt}**\n\nN/A", key="btn_rkt", use_container_width=True, disabled=True)
 
     # Dual-axis chart: Rates (left) + RKT Stock (right)
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Add rate lines (left y-axis)
+    # Add rate lines based on visibility state (left y-axis)
     colors = {'30Y Fixed': '#636EFA', '15Y Fixed': '#EF553B', '10Y Treasury': '#00CC96'}
-    for col in data.columns:
-        fig.add_trace(
-            go.Scatter(x=data.index, y=data[col], name=col, line=dict(color=colors.get(col))),
-            secondary_y=False
-        )
+    visibility_map = {'30Y Fixed': st.session_state.show_30y, '15Y Fixed': st.session_state.show_15y, '10Y Treasury': st.session_state.show_10y}
 
-    # Add RKT stock (right y-axis)
-    if not rkt_data.empty:
+    for col in data.columns:
+        if visibility_map.get(col, True):
+            fig.add_trace(
+                go.Scatter(x=data.index, y=data[col], name=col, line=dict(color=colors.get(col))),
+                secondary_y=False
+            )
+
+    # Add RKT stock (right y-axis) if visible
+    if not rkt_data.empty and st.session_state.show_rkt:
         fig.add_trace(
             go.Scatter(x=rkt_data.index, y=rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
             secondary_y=True
         )
 
     fig.update_layout(
-        template="plotly_dark",
+        template=theme['plotly'],
         height=300,
         margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
@@ -304,10 +399,22 @@ with tabs[1]:
 
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:
-    st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
+    # Header with Expand/Collapse buttons
+    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    with hdr_col1:
+        st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
+    with hdr_col2:
+        if st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True):
+            st.session_state.expand_journalists = True
+            st.rerun()
+    with hdr_col3:
+        if st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True):
+            st.session_state.expand_journalists = False
+            st.rerun()
+
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
-        with cols[idx % 2].expander(f"📰 {name}"):
+        with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
             try:
                 with st.spinner("⟳"):
                     articles = fetch_and_filter(rss, search_query)
@@ -332,12 +439,23 @@ def fetch_podcast_with_fallback(rss_urls, query):
     return []
 
 with tabs[3]:
-    st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
+    # Header with Expand/Collapse buttons
+    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    with hdr_col1:
+        st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
+    with hdr_col2:
+        if st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True):
+            st.session_state.expand_podcasts = True
+            st.rerun()
+    with hdr_col3:
+        if st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True):
+            st.session_state.expand_podcasts = False
+            st.rerun()
+
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
         col = cols[idx % 2]
-        # Podcasts start collapsed - only load when user expands
-        with col.expander(f"🎧 {name}", expanded=False):
+        with col.expander(f"🎧 {name}", expanded=st.session_state.expand_podcasts):
             try:
                 with st.spinner(f"⟳ Fetching {name}..."):
                     eps = fetch_podcast_with_fallback(rss, search_query)

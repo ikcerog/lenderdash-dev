@@ -71,20 +71,22 @@ def get_mortgage_data():
 
 @st.cache_data(ttl=3600)
 def get_rkt_stock_data():
-    """Fetch RKT stock price from Yahoo Finance."""
+    """Fetch RKT stock price from Alpha Vantage (free API)."""
+    # Get free API key at: https://www.alphavantage.co/support/#api-key
+    API_KEY = "RLVMLTHDYZJU7SUI"  # Replace with your free Alpha Vantage API key
     headers = {"User-Agent": "Mozilla/5.0"}
-    # Get 1 year of daily data
-    end = int(datetime.now().timestamp())
-    start = int((datetime.now() - timedelta(days=MAX_FRED_DAYS)).timestamp())
-    url = f"https://query1.finance.yahoo.com/v7/finance/download/RKT?period1={start}&period2={end}&interval=1d&events=history"
+    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=RKT&apikey={API_KEY}&datatype=csv"
     try:
         r = requests.get(url, headers=headers, timeout=10)
+        if "Error" in r.text or "Invalid" in r.text:
+            return pd.DataFrame()
         df = pd.read_csv(io.StringIO(r.text))
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.set_index('Date')
-        df = df[['Close']].rename(columns={'Close': 'RKT'})
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.set_index('timestamp').sort_index()
+        df = df[['close']].rename(columns={'close': 'RKT'})
         df['RKT'] = pd.to_numeric(df['RKT'], errors='coerce')
-        return df
+        # Limit to match FRED data range
+        return df.tail(MAX_FRED_DAYS)
     except:
         return pd.DataFrame()
 

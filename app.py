@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import feedparser
 import requests
 import io
 import re
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Mortgage & Media Intelligence", layout="wide", initial_sidebar_state="expanded")
@@ -67,6 +68,25 @@ def get_mortgage_data():
     combined = pd.concat(dfs, axis=1).ffill().dropna()
     # Limit to last MAX_FRED_DAYS for memory efficiency
     return combined.tail(MAX_FRED_DAYS)
+
+@st.cache_data(ttl=3600)
+def get_rkt_stock_data():
+    """Fetch RKT stock price from Yahoo Finance."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    # Get 1 year of daily data
+    end = int(datetime.now().timestamp())
+    start = int((datetime.now() - timedelta(days=MAX_FRED_DAYS)).timestamp())
+    url = f"https://query1.finance.yahoo.com/v7/finance/download/RKT?period1={start}&period2={end}&interval=1d&events=history"
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        df = pd.read_csv(io.StringIO(r.text))
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.set_index('Date')
+        df = df[['Close']].rename(columns={'Close': 'RKT'})
+        df['RKT'] = pd.to_numeric(df['RKT'], errors='coerce')
+        return df
+    except:
+        return pd.DataFrame()
 
 # --- CONTENT ENGINES (Cached for efficiency) ---
 @st.cache_data(ttl=900)  # Cache RSS feeds for 15 minutes
@@ -201,13 +221,49 @@ JOURNALISTS = {
 
 # --- DASHBOARD RENDER ---
 data = get_mortgage_data()
+rkt_data = get_rkt_stock_data()
+
 if not data.empty:
-    m1, m2, m3 = st.columns(3)
+    # Metrics row - add RKT
+    m1, m2, m3, m4 = st.columns(4)
     curr, prev = data.iloc[-1], data.iloc[-2]
     m1.metric("30Y Fixed", f"{curr['30Y Fixed']}%", f"{round(curr['30Y Fixed']-prev['30Y Fixed'], 3)}%")
     m2.metric("15Y Fixed", f"{curr['15Y Fixed']}%", f"{round(curr['15Y Fixed']-prev['15Y Fixed'], 3)}%")
     m3.metric("10Y Treasury", f"{curr['10Y Treasury']}%", f"{round(curr['10Y Treasury']-prev['10Y Treasury'], 3)}%")
-    st.plotly_chart(px.line(data, y=data.columns, template="plotly_dark", height=300), use_container_width=True)
+    if not rkt_data.empty and len(rkt_data) >= 2:
+        rkt_curr, rkt_prev = rkt_data.iloc[-1]['RKT'], rkt_data.iloc[-2]['RKT']
+        m4.metric("RKT", f"${rkt_curr:.2f}", f"{rkt_curr - rkt_prev:.2f}")
+    else:
+        m4.metric("RKT", "N/A", "")
+
+    # Dual-axis chart: Rates (left) + RKT Stock (right)
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # Add rate lines (left y-axis)
+    colors = {'30Y Fixed': '#636EFA', '15Y Fixed': '#EF553B', '10Y Treasury': '#00CC96'}
+    for col in data.columns:
+        fig.add_trace(
+            go.Scatter(x=data.index, y=data[col], name=col, line=dict(color=colors.get(col))),
+            secondary_y=False
+        )
+
+    # Add RKT stock (right y-axis)
+    if not rkt_data.empty:
+        fig.add_trace(
+            go.Scatter(x=rkt_data.index, y=rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
+            secondary_y=True
+        )
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=300,
+        margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    fig.update_yaxes(title_text="Rate (%)", secondary_y=False)
+    fig.update_yaxes(title_text="RKT ($)", secondary_y=True)
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- SEARCH BAR (below chart for visibility) ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()

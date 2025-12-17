@@ -21,6 +21,22 @@ st.markdown("""
     .stExpander { border: 1px solid #444 !important; }
     .stExpander p { word-break: break-all; }
     .episode-summary { font-size: 0.85em; color: #aaa; margin-top: 4px; margin-bottom: 8px; }
+    /* Loading indicator - prominent pulsing animation */
+    .stSpinner > div { border-color: #4CAF50 transparent transparent transparent !important; }
+    .loading-banner {
+        background: linear-gradient(90deg, #1a1a2e, #16213e, #1a1a2e);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        padding: 12px 20px;
+        border-radius: 8px;
+        border: 1px solid #4CAF50;
+        margin-bottom: 16px;
+        text-align: center;
+    }
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -190,8 +206,54 @@ if not data.empty:
 
 st.divider()
 
-tabs = st.tabs(["🎙️ Podcast Guest Tracker", "🖋️ Journalist Feed", "🏢 Competitors", "🗞️ Industry News"])
+# Reordered tabs: News first (fast), Podcasts last (slow to load)
+tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 
+# --- TAB 0: Industry News (fastest) ---
+with tabs[0]:
+    industry = {
+        "National Mortgage News": "https://www.nationalmortgagenews.com/feed?rss=true",
+        "Mortgage News Daily": "http://www.mortgagenewsdaily.com/rss/news"
+    }
+    for label, url in industry.items():
+        st.subheader(label)
+        with st.spinner(f"⟳ Loading {label}..."):
+            items = fetch_and_filter(url, search_query, limit=4)
+        for item in items:
+            st.markdown(f"🔹 **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
+
+# --- TAB 1: Competitors ---
+with tabs[1]:
+    comps = {
+        "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
+        "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
+        "UWM (Updates)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
+    }
+    for label, url in comps.items():
+        st.subheader(label)
+        with st.spinner(f"⟳ Loading {label}..."):
+            items = fetch_and_filter(url, search_query, limit=4)
+        for item in items:
+            st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
+
+# --- TAB 2: Journalist Feed ---
+with tabs[2]:
+    st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
+    cols = st.columns(2)
+    for idx, (name, rss) in enumerate(JOURNALISTS.items()):
+        with cols[idx % 2].expander(f"📰 {name}"):
+            try:
+                with st.spinner("⟳"):
+                    articles = fetch_and_filter(rss, search_query)
+                if not articles: st.write("No matches found.")
+                for a in articles:
+                    link = a.get('link', '#')
+                    st.markdown(f"📄 **[{a.get('title', 'Article')}]({link})**")
+                    st.caption(f"{a.get('published', '')[:16]}")
+            except:
+                st.error(f"Error loading {name}")
+
+# --- TAB 3: Podcasts (lazy-loaded, slowest) ---
 def fetch_podcast_with_fallback(rss_urls, query):
     """Try multiple RSS URLs for podcasts with fallback support."""
     if isinstance(rss_urls, str):
@@ -203,21 +265,23 @@ def fetch_podcast_with_fallback(rss_urls, query):
             return eps
     return []
 
-with tabs[0]:
-    st.info("Tracking recent guests and episode intelligence across target shows.")
+with tabs[3]:
+    st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
         col = cols[idx % 2]
-        with col.expander(f"🎧 {name}", expanded=True if search_query else False):
+        # Podcasts start collapsed - only load when user expands
+        with col.expander(f"🎧 {name}", expanded=False):
             try:
-                eps = fetch_podcast_with_fallback(rss, search_query)
+                with st.spinner(f"⟳ Fetching {name}..."):
+                    eps = fetch_podcast_with_fallback(rss, search_query)
                 if not eps:
                     st.write("No episodes found or feed unavailable.")
                 for e in eps:
                     link = e.get('link', '#')
                     title = e.get('title', 'Untitled Episode')
                     guest = parse_guest(title)
-                    st.markdown(f"👤 **{guest}** — [Link]({link})")
+                    st.markdown(f"🎤 **{guest}** — [Link]({link})")
                     # Add summary if available
                     summary = get_summary(e)
                     if summary:
@@ -225,43 +289,5 @@ with tabs[0]:
                     st.caption(f"{e.get('published', '')[:16]}")
             except:
                 st.error(f"Error loading {name}")
-
-with tabs[1]:
-    st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
-    cols = st.columns(2)
-    for idx, (name, rss) in enumerate(JOURNALISTS.items()):
-        with cols[idx % 2].expander(f"🖋️ {name}"):
-            try:
-                articles = fetch_and_filter(rss, search_query)
-                if not articles: st.write("No matches found.")
-                for a in articles:
-                    link = a.get('link', '#')
-                    st.markdown(f"📄 **[{a.get('title', 'Article')}]({link})**")
-                    st.caption(f"{a.get('published', '')[:16]}")
-            except:
-                st.error(f"Error loading {name}")
-
-with tabs[2]:
-    comps = {
-        "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
-        "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
-        "UWM (Updates)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
-    }
-    for label, url in comps.items():
-        st.subheader(label)
-        items = fetch_and_filter(url, search_query, limit=4)
-        for item in items:
-            st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
-
-with tabs[3]:
-    industry = {
-        "National Mortgage News": "https://www.nationalmortgagenews.com/feed?rss=true",
-        "Mortgage News Daily": "http://www.mortgagenewsdaily.com/rss/news"
-    }
-    for label, url in industry.items():
-        st.subheader(label)
-        items = fetch_and_filter(url, search_query, limit=4)
-        for item in items:
-            st.markdown(f"🗞️ **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
 
 st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")

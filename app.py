@@ -15,6 +15,8 @@ st.markdown("""
     <style>
     .stMetric { background-color: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #333; }
     .stExpander { border: 1px solid #444 !important; }
+    /* Ensure the app doesn't crash on long titles */
+    .stExpander p { word-break: break-all; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -22,7 +24,7 @@ st.title("🏦 Mortgage & Media Command Center")
 
 # --- GLOBAL SEARCH ---
 st.sidebar.title("🔍 Intel Search")
-search_query = st.sidebar.text_input("Filter across all feeds:", placeholder="e.g. 'Fed', 'Inventory', 'Altman'").lower()
+search_query = st.sidebar.text_input("Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'").lower()
 
 # --- FRED DATA ENGINE ---
 @st.cache_data(ttl=3600)
@@ -49,15 +51,19 @@ def get_mortgage_data():
 # --- CONTENT ENGINES ---
 def fetch_and_filter(url, query, limit=8):
     try:
-        feed = feedparser.parse(url)
+        # User-agent helps prevent some RSS feeds from blocking the request
+        feed = feedparser.parse(url, agent='Mozilla/5.0')
         entries = []
+        if not feed.entries:
+            return []
         for entry in feed.entries:
             title = entry.get('title', '')
             summary = entry.get('summary', '')
             if query in title.lower() or query in summary.lower():
                 entries.append(entry)
         return entries[:limit]
-    except: return []
+    except Exception as e:
+        return []
 
 def parse_guest(title):
     patterns = [r"^(?:#\d+[:\s]+)?([^|:—-]+)", r"with\s+([^|:—-]+)", r"ft\.\s+([^|:—-]+)"]
@@ -69,20 +75,20 @@ def parse_guest(title):
     return title[:40]
 
 def get_gnews_rss(name, source):
-    # Pro-tip hack for WSJ/Barron's authors
+    # This remains the most stable 'hack' for non-RSS publications
     query = f'inauthor:"{name}" source:"{source}"'
     return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}"
 
-# --- SOURCE DIRECTORIES ---
+# --- UPDATED SOURCE LISTS ---
 PODCASTS = {
-    "Diary of a CEO": "https://rss2.flightcast.com/xmsftuzjjykcmqwolaqn6mdn",
+    "Diary of a CEO": "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
     "Lex Fridman": "https://lexfridman.com/feed/podcast/",
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
     "All-In": "http://allinchamathjason.libsyn.com/rss",
     "Acquired": "https://feeds.transistor.fm/acquired",
     "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
     "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",
-    "TBPN": "https://feeds.transistor.fm/technology-brother",
+    "TBPN (Tech Brothers)": "https://feeds.transistor.fm/technology-brother",
     "How Leaders Lead": "https://feeds.megaphone.fm/how-leaders-lead",
     "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
 }
@@ -95,13 +101,9 @@ JOURNALISTS = {
     "AnnaMaria Andriotis (WSJ)": get_gnews_rss("AnnaMaria Andriotis", "The Wall Street Journal"),
     "Veronica Dagher (WSJ)": get_gnews_rss("Veronica Dagher", "The Wall Street Journal"),
     "Telis Demos (WSJ)": get_gnews_rss("Telis Demos", "The Wall Street Journal"),
-    "Robyn Friedman (WSJ)": get_gnews_rss("Robyn Friedman", "The Wall Street Journal"),
-    "Tara Siegel Bernard (NYT)": "https://www.nytimes.com/svc/collections/v1/publish/www.nytimes.com/by/tara-siegel-bernard/rss.xml",
     "Nick Manes (Crain's)": "https://www.crainsdetroit.com/author/nick-manes/feed",
     "Sarah Wolak (HW)": "https://www.housingwire.com/author/sarahwolak/feed",
-    "Matt Carter (Inman)": "https://www.inman.com/author/mattcarter/feed",
-    "Shaina Mishkin (Barron's)": get_gnews_rss("Shaina Mishkin", "Barron's"),
-    "Aarthi Swaminathan (MW)": "https://www.marketwatch.com/author/aarthi-swaminathan/feed"
+    "Shaina Mishkin (Barron's)": get_gnews_rss("Shaina Mishkin", "Barron's")
 }
 
 # --- DASHBOARD RENDER ---
@@ -116,28 +118,43 @@ if not data.empty:
 
 st.divider()
 
-tabs = st.tabs(["🎙️ Podcast Guest Tracker", "✍️ Elite Journalist Feed", "🏢 Competitors", "📰 Industry News"])
+tabs = st.tabs(["🎙️ Podcast Guest Tracker", "🖋️ Journalist Feed", "🏢 Competitors", "🗞️ Industry News"])
 
 with tabs[0]:
-    st.info("Varun's Pursuit: Tracking latest guests and episode topics.")
+    st.info("Tracking recent guests and episode intelligence across target shows.")
     cols = st.columns(2)
+    # We loop through all podcasts; if one fails, the loop continues to the next
     for idx, (name, rss) in enumerate(PODCASTS.items()):
-        with cols[idx % 2].expander(f"🎧 {name}", expanded=True if search_query else False):
-            eps = fetch_and_filter(rss, search_query)
-            for e in eps:
-                st.markdown(f"👤 **{parse_guest(e.title)}** — [Link]({e.link})")
-                st.caption(f"{e.get('published', '')[:16]}")
+        col = cols[idx % 2]
+        with col.expander(f"🎧 {name}", expanded=True if search_query else False):
+            try:
+                eps = fetch_and_filter(rss, search_query)
+                if not eps:
+                    st.write("No episodes found or feed unavailable.")
+                for e in eps:
+                    # Logic Fix: Use .get() to prevent AttributeError
+                    link = e.get('link', '#')
+                    title = e.get('title', 'Untitled Episode')
+                    guest = parse_guest(title)
+                    st.markdown(f"👤 **{guest}** — [Link]({link})")
+                    st.caption(f"{e.get('published', '')[:16]}")
+            except:
+                st.error(f"Error loading {name}")
 
 with tabs[1]:
-    st.info("Direct and 'Hacked' feeds for key financial & real estate journalists.")
+    st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
         with cols[idx % 2].expander(f"🖋️ {name}"):
-            articles = fetch_and_filter(rss, search_query)
-            if not articles: st.write("No recent articles found.")
-            for a in articles:
-                st.markdown(f"📄 **[{a.title}]({a.link})**")
-                st.caption(f"{a.get('published', '')[:16]}")
+            try:
+                articles = fetch_and_filter(rss, search_query)
+                if not articles: st.write("No matches found.")
+                for a in articles:
+                    link = a.get('link', '#')
+                    st.markdown(f"📄 **[{a.get('title', 'Article')}]({link})**")
+                    st.caption(f"{a.get('published', '')[:16]}")
+            except:
+                st.error(f"Error loading {name}")
 
 with tabs[2]:
     comps = {
@@ -147,8 +164,9 @@ with tabs[2]:
     }
     for label, url in comps.items():
         st.subheader(label)
-        for item in fetch_and_filter(url, search_query, limit=4):
-            st.markdown(f"🔹 **[{item.title}]({item.link})**")
+        items = fetch_and_filter(url, search_query, limit=4)
+        for item in items:
+            st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
 
 with tabs[3]:
     industry = {
@@ -157,7 +175,8 @@ with tabs[3]:
     }
     for label, url in industry.items():
         st.subheader(label)
-        for item in fetch_and_filter(url, search_query, limit=4):
-            st.markdown(f"🗞️ **[{item.title}]({item.link})**")
+        items = fetch_and_filter(url, search_query, limit=4)
+        for item in items:
+            st.markdown(f"🗞️ **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
 
 st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")

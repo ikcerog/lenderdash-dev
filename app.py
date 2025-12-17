@@ -42,10 +42,6 @@ st.markdown("""
 
 st.title("🏦 Mortgage & Media Command Center")
 
-# --- GLOBAL SEARCH ---
-st.sidebar.title("🔍 Intel Search")
-search_query = st.sidebar.text_input("Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'").lower()
-
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)
 def get_mortgage_data():
@@ -155,16 +151,24 @@ def get_summary(entry, max_length=150):
         summary = summary[:max_length].rsplit(' ', 1)[0] + '...'
     return summary if summary else None
 
-def get_gnews_rss(name, source):
-    # This remains the most stable 'hack' for non-RSS publications
-    query = f'inauthor:"{name}" source:"{source}"'
-    return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}"
+def get_gnews_rss(name, domain=None):
+    """
+    Build Google News RSS URL for journalist articles.
+    Uses site: operator with domain for more targeted results.
+    """
+    if domain:
+        query = f'"{name}" site:{domain}.com'
+    else:
+        query = f'"{name}"'
+    return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-US&gl=US&ceid=US:en"
 
 # --- UPDATED SOURCE LISTS ---
 # Multiple fallback URLs for Diary of a CEO for reliability
+# Apple Podcasts ID: 1291423644 - use this to find canonical feed
 DOAC_FEEDS = [
-    "https://feeds.megaphone.fm/thedairyofaceo",
+    "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
     "https://feeds.megaphone.fm/the-diary-of-a-ceo",
+    "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
     "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
 ]
 
@@ -181,17 +185,18 @@ PODCASTS = {
     "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
 }
 
+# Journalist feeds - using simpler Google News queries for better 2025 results
 JOURNALISTS = {
-    "Nick Timiraos (WSJ)": get_gnews_rss("Nick Timiraos", "The Wall Street Journal"),
-    "Gina Heeb (WSJ)": get_gnews_rss("Gina Heeb", "The Wall Street Journal"),
-    "Ben Eisen (WSJ)": get_gnews_rss("Ben Eisen", "The Wall Street Journal"),
-    "Nicole Friedman (WSJ)": get_gnews_rss("Nicole Friedman", "The Wall Street Journal"),
-    "AnnaMaria Andriotis (WSJ)": get_gnews_rss("AnnaMaria Andriotis", "The Wall Street Journal"),
-    "Veronica Dagher (WSJ)": get_gnews_rss("Veronica Dagher", "The Wall Street Journal"),
-    "Telis Demos (WSJ)": get_gnews_rss("Telis Demos", "The Wall Street Journal"),
+    "Nick Timiraos (WSJ)": get_gnews_rss("Nick Timiraos", "wsj"),
+    "Gina Heeb (WSJ)": get_gnews_rss("Gina Heeb", "wsj"),
+    "Ben Eisen (WSJ)": get_gnews_rss("Ben Eisen", "wsj"),
+    "Nicole Friedman (WSJ)": get_gnews_rss("Nicole Friedman", "wsj"),
+    "AnnaMaria Andriotis (WSJ)": get_gnews_rss("AnnaMaria Andriotis", "wsj"),
+    "Veronica Dagher (WSJ)": get_gnews_rss("Veronica Dagher", "wsj"),
+    "Telis Demos (WSJ)": get_gnews_rss("Telis Demos", "wsj"),
     "Nick Manes (Crain's)": "https://www.crainsdetroit.com/author/nick-manes/feed",
     "Sarah Wolak (HW)": "https://www.housingwire.com/author/sarahwolak/feed",
-    "Shaina Mishkin (Barron's)": get_gnews_rss("Shaina Mishkin", "Barron's")
+    "Shaina Mishkin (Barron's)": get_gnews_rss("Shaina Mishkin", "barrons")
 }
 
 # --- DASHBOARD RENDER ---
@@ -203,6 +208,9 @@ if not data.empty:
     m2.metric("15Y Fixed", f"{curr['15Y Fixed']}%", f"{round(curr['15Y Fixed']-prev['15Y Fixed'], 3)}%")
     m3.metric("10Y Treasury", f"{curr['10Y Treasury']}%", f"{round(curr['10Y Treasury']-prev['10Y Treasury'], 3)}%")
     st.plotly_chart(px.line(data, y=data.columns, template="plotly_dark", height=300), use_container_width=True)
+
+# --- SEARCH BAR (below chart for visibility) ---
+search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()
 
 st.divider()
 

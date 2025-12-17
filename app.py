@@ -4,15 +4,27 @@ import plotly.express as px
 import feedparser
 import requests
 import io
+import re
 from datetime import datetime
 
-# Page Configuration
-st.set_page_config(page_title="Mortgage Intel Dashboard", layout="wide", initial_sidebar_state="collapsed")
+# --- CONFIG & STYLING ---
+st.set_page_config(page_title="Mortgage & Leadership Intel", layout="wide", initial_sidebar_state="expanded")
 
-st.title("🏦 Mortgage Industry Intelligence")
-st.markdown(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+# Custom CSS for a professional 'Terminal' feel
+st.markdown("""
+    <style>
+    .stMetric { background-color: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #333; }
+    .stExpander { border: 1px solid #444 !important; }
+    </style>
+""", unsafe_allow_stdio=True)
 
-# --- DATA FETCHING (FRED with User-Agent Fix) ---
+st.title("🏦 Mortgage & Leadership Command Center")
+
+# --- GLOBAL SEARCH ---
+st.sidebar.title("🔍 Search Intelligence")
+search_query = st.sidebar.text_input("Filter all news & podcasts:", placeholder="e.g. 'Rocket', 'AI', 'Jamie Dimon'").lower()
+
+# --- FRED DATA ENGINE (Mortgage Rates) ---
 @st.cache_data(ttl=3600)
 def get_mortgage_data():
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -31,74 +43,98 @@ def get_mortgage_data():
             df = df.rename(columns={date_col: 'DATE', val_col: name})
             df[name] = pd.to_numeric(df[name], errors='coerce')
             dfs.append(df.set_index('DATE'))
-        except Exception as e:
-            st.error(f"Error loading {name}: {e}")
-    
-    return pd.concat(dfs, axis=1).ffill().dropna()
+        except: continue
+    return pd.concat(dfs, axis=1).ffill().dropna() if dfs else pd.DataFrame()
 
-# --- NEWS FETCHING ENGINE ---
-def render_feed(title, url, limit=5):
-    with st.expander(f"📖 {title}", expanded=True):
+# --- CONTENT ENGINE ---
+def fetch_and_filter(url, query, limit=10):
+    try:
         feed = feedparser.parse(url)
-        if not feed.entries:
-            st.write("No recent updates found.")
-        for entry in feed.entries[:limit]:
-            # Clean up timestamp
-            ts = entry.get('published', 'No Date')
-            st.markdown(f"**[{entry.title}]({entry.link})**")
-            st.caption(f"{ts} | {title}")
+        entries = []
+        for entry in feed.entries:
+            title = entry.get('title', '')
+            summary = entry.get('summary', '')
+            if query in title.lower() or query in summary.lower():
+                entries.append(entry)
+        return entries[:limit]
+    except: return []
 
-# --- MAIN UI ---
+def parse_guest(title):
+    # Regex to pull names out of common podcast title formats
+    # Handles: "Guest Name | ...", "Guest Name: ...", "with Guest Name", "#123: Guest Name"
+    patterns = [
+        r"^(?:#\d+[:\s]+)?([^|:—-]+)", # Before separators
+        r"with\s+([^|:—-]+)",          # After 'with'
+        r"ft\.\s+([^|:—-]+)"           # After 'ft.'
+    ]
+    for p in patterns:
+        match = re.search(p, title)
+        if match:
+            clean = match.group(1).strip()
+            return clean if len(clean) > 3 else title[:30]
+    return title[:40]
+
+# --- SOURCES ---
+PODCASTS = {
+    "Diary of a CEO": "https://rss2.flightcast.com/xmsftuzjjykcmqwolaqn6mdn",
+    "Lex Fridman": "https://lexfridman.com/feed/podcast/",
+    "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
+    "All-In": "http://allinchamathjason.libsyn.com/rss",
+    "Acquired": "https://feeds.transistor.fm/acquired",
+    "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
+    "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",
+    "TBPN (Tech Brothers)": "https://feeds.transistor.fm/technology-brother",
+    "How Leaders Lead": "https://feeds.megaphone.fm/how-leaders-lead",
+    "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
+}
+
+# --- DASHBOARD LAYOUT ---
 data = get_mortgage_data()
 if not data.empty:
-    latest = data.iloc[-1]
-    prev = data.iloc[-2]
-
-    # Metrics
     m1, m2, m3 = st.columns(3)
-    m1.metric("30Y Fixed", f"{latest['30Y Fixed']}%", f"{round(latest['30Y Fixed']-prev['30Y Fixed'], 3)}%")
-    m2.metric("15Y Fixed", f"{latest['15Y Fixed']}%", f"{round(latest['15Y Fixed']-prev['15Y Fixed'], 3)}%")
-    m3.metric("10Y Treasury", f"{latest['10Y Treasury']}%", f"{round(latest['10Y Treasury']-prev['10Y Treasury'], 3)}%")
-
-    # Chart
-    fig = px.line(data, y=data.columns, title="Rate Trends", template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
+    curr, prev = data.iloc[-1], data.iloc[-2]
+    m1.metric("30Y Fixed", f"{curr['30Y Fixed']}%", f"{round(curr['30Y Fixed']-prev['30Y Fixed'], 3)}%")
+    m2.metric("15Y Fixed", f"{curr['15Y Fixed']}%", f"{round(curr['15Y Fixed']-prev['15Y Fixed'], 3)}%")
+    m3.metric("10Y Treasury", f"{curr['10Y Treasury']}%", f"{round(curr['10Y Treasury']-prev['10Y Treasury'], 3)}%")
+    st.plotly_chart(px.line(data, y=data.columns, template="plotly_dark", height=350), use_container_width=True)
 
 st.divider()
 
-# --- THE RSS ENGINE (Organized by Strategy) ---
-st.subheader("🎯 Market & Competitor Intelligence")
-tab1, tab2, tab3, tab4 = st.tabs(["Key Reporters", "The Big Two (Rocket/UWM)", "Industry News", "Podcasts"])
+t1, t2, t3 = st.tabs(["🎙️ Podcast Guest Tracker", "🏢 Competitors (Rocket/UWM)", "📰 Industry News"])
 
-with tab1:
-    col1, col2 = st.columns(2)
-    with col1:
-        render_feed("Connie Kim (HW)", "https://www.housingwire.com/author/Connie-Kim/feed/")
-        render_feed("Flavia Furlan Nunes (HW)", "https://www.housingwire.com/author/Flavia-Furlan-Nunes/feed/")
-    with col2:
-        render_feed("James Kleimann (HW)", "https://www.housingwire.com/author/James-Kleimann/feed/")
+with t1:
+    st.info("Varun's Pursuit List: Tracking the last 10 guests across elite shows.")
+    p_cols = st.columns(2)
+    for idx, (name, rss) in enumerate(PODCASTS.items()):
+        col = p_cols[idx % 2]
+        with col.expander(f"🎧 {name}", expanded=True if search_query else False):
+            episodes = fetch_and_filter(rss, search_query)
+            if not episodes: st.write("No matches found.")
+            for ep in episodes:
+                guest = parse_guest(ep.title)
+                st.markdown(f"👤 **{guest}** — [Link]({ep.link})")
+                st.caption(f"{ep.get('published', '')[:16]} | {ep.title[:60]}...")
 
-with tab2:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("Rocket Mortgage Focus")
-        render_feed("Rocket (HW Tag)", "https://www.housingwire.com/tag/rocket-mortgage/feed/")
-        render_feed("Rocket Co. Press", "https://www.rocketcompanies.com/feed/?post_type=press_release")
-    with col2:
-        st.info("UWM Focus")
-        render_feed("UWM (BusinessWire)", "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA==?_gl=1*16nikhv*_gcl_au*MzE3OTYyNzg4LjE3MjQ3NjUwMjM.*_ga*MTI5NTUzNDI3OS4xNzI0NzY1MDIz*_ga_ZQWF70T3FK*MTcyNjA2NzQyNC4zLjEuMTcyNjA2NzQzOS40NS4wLjA.")
+with t2:
+    comp_feeds = {
+        "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
+        "Rocket Companies (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
+        "UWM (BusinessWire)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
+    }
+    for label, url in comp_feeds.items():
+        st.subheader(label)
+        for item in fetch_and_filter(url, search_query, limit=5):
+            st.markdown(f"🔹 **[{item.title}]({item.link})**")
 
-with tab3:
-    render_feed("National Mortgage News", "https://www.nationalmortgagenews.com/feed?rss=true")
-    render_feed("Mortgage News Daily", "http://www.mortgagenewsdaily.com/rss/news")
+with t3:
+    industry = {
+        "National Mortgage News": "https://www.nationalmortgagenews.com/feed?rss=true",
+        "Mortgage News Daily": "http://www.mortgagenewsdaily.com/rss/news"
+    }
+    for label, url in industry.items():
+        st.subheader(label)
+        for item in fetch_and_filter(url, search_query, limit=5):
+            st.markdown(f"🗞️ **[{item.title}]({item.link})**")
+            st.caption(item.get('published', ''))
 
-with tab4:
-    st.write("🎧 **Latest Audio Briefings**")
-    render_feed("NBC News Podcast", "https://podcastfeeds.nbcnews.com/HL4TzgYCw")
-
-st.sidebar.markdown("""
-### 🛠️ Dashboard Tools
-- **Data Source:** FRED & RSS
-- **Refresh:** Hourly
-- **Status:** 🟢 Live
-""")
+st.sidebar.markdown(f"--- \n**System Status:** 🟢 Online \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")

@@ -143,7 +143,7 @@ def get_mortgage_data():
 def get_rkt_stock_data():
     """Fetch RKT stock price from Alpha Vantage (free API)."""
     # Get free API key at: https://www.alphavantage.co/support/#api-key
-    API_KEY = "demo"  # Replace with your free Alpha Vantage API key
+    API_KEY = "6Q6KUI4U8GWVXJMS"  # Replace with your free Alpha Vantage API key
     headers = {"User-Agent": "Mozilla/5.0"}
     url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=RKT&apikey={API_KEY}&datatype=csv"
     try:

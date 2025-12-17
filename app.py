@@ -10,13 +10,13 @@ from datetime import datetime
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Mortgage & Leadership Intel", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS for a professional 'Terminal' feel
+# Fixed: changed unsafe_allow_stdio to unsafe_allow_html
 st.markdown("""
     <style>
     .stMetric { background-color: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #333; }
     .stExpander { border: 1px solid #444 !important; }
     </style>
-""", unsafe_allow_stdio=True)
+""", unsafe_allow_html=True)
 
 st.title("🏦 Mortgage & Leadership Command Center")
 
@@ -60,8 +60,6 @@ def fetch_and_filter(url, query, limit=10):
     except: return []
 
 def parse_guest(title):
-    # Regex to pull names out of common podcast title formats
-    # Handles: "Guest Name | ...", "Guest Name: ...", "with Guest Name", "#123: Guest Name"
     patterns = [
         r"^(?:#\d+[:\s]+)?([^|:—-]+)", # Before separators
         r"with\s+([^|:—-]+)",          # After 'with'

@@ -155,8 +155,8 @@ def get_rkt_historical_from_sheet():
     2024-01-02,15.45
     ...
     """
-    # TODO: Replace with your Google Sheet CSV export URL
-    SHEET_URL = https://docs.google.com/spreadsheets/d/e/2PACX-1vRbhaj5pOJbUNEpOEp-xaNi9vn8UyKNBndxMClDsKLmMDu7jCOXEz5GZEofCt2kH6RA9I84YW4EG8Td/pubhtml  # Example: "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=0"
+    # Google Sheet CSV export URL (published sheet format)
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRbhaj5pOJbUNEpOEp-xaNi9vn8UyKNBndxMClDsKLmMDu7jCOXEz5GZEofCt2kH6RA9I84YW4EG8Td/pub?output=csv"
 
     if not SHEET_URL:
         return pd.DataFrame()

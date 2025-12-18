@@ -8,6 +8,7 @@ import io
 import re
 import urllib.parse
 from datetime import datetime, timedelta
+from collections import Counter
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Mortgage & Media Intelligence", layout="wide", initial_sidebar_state="expanded")
@@ -37,6 +38,8 @@ if 'expand_journalists' not in st.session_state:
     st.session_state.expand_journalists = False
 if 'expand_podcasts' not in st.session_state:
     st.session_state.expand_podcasts = False
+if 'show_trends' not in st.session_state:
+    st.session_state.show_trends = False
 
 # --- THEME DEFINITIONS ---
 THEMES = {
@@ -73,17 +76,10 @@ theme = THEMES[st.session_state.theme]
 
 st.markdown(f"""
     <style>
-    /* Import Saira font */
-    @import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,100..900;1,100..900&display=swap');
-
-    /* Apply Saira across all Streamlit elements */
-    html, body, [class*="css"], .stApp, * {{
-        font-family: 'Saira', sans-serif !important;
-    }}
-    *[data-testid="stIconMaterial"] {{ font-family: 'Material Symbols Rounded' !important; }}
-    .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: "Saira", sans-serif !important; }}
+    .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}
+    h1, h2, h3, h4, h5, h6 {{ color: {theme['text']} !important; }}
     .stMetric {{ background-color: {theme['card_bg']}; padding: 10px; border-radius: 5px; border: 1px solid {theme['border']}; cursor: pointer; transition: opacity 0.2s; }}
     .stMetric:hover {{ opacity: 0.8; }}
     .metric-hidden {{ opacity: 0.4; }}
@@ -106,17 +102,17 @@ st.markdown(f"""
         0% {{ background-position: -200% 0; }}
         100% {{ background-position: 200% 0; }}
     }}
-    .search-results {{
+    .trend-badge {{
+        display: inline-block;
         background-color: {theme['card_bg']};
-        padding: 20px;
-        border-radius: 8px;
         border: 1px solid {theme['border']};
-        margin-bottom: 20px;
+        border-radius: 12px;
+        padding: 4px 10px;
+        margin: 4px;
+        font-size: 0.85em;
     }}
-    .search-results h3 {{
-        color: {theme['text']};
-        margin-bottom: 15px;
-    }}
+    .trending {{ border-color: #FF6B6B; background-color: rgba(255, 107, 107, 0.1); }}
+    .emerging {{ border-color: #4ECDC4; background-color: rgba(78, 205, 196, 0.1); }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -350,6 +346,76 @@ def parse_guest(title):
     # Last resort: return truncated title
     return title[:45] + '...' if len(title) > 45 else title
 
+def extract_keywords(text):
+    """Extract meaningful keywords from text (titles, summaries)."""
+    # Remove common stop words
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were', 'will', 'has', 'have', 'had', 'this', 'that', 'these', 'those', 'from', 'by', 'as', 'it', 'its', 'their', 'what', 'which', 'who', 'how', 'why', 'when'}
+    
+    # Clean and tokenize
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    words = text.split()
+    
+    # Filter keywords
+    keywords = [w for w in words if len(w) > 3 and w not in stop_words]
+    return keywords
+
+def analyze_podcast_trends(podcast_data):
+    """Analyze podcast episodes to find trending guests and topics."""
+    guest_counter = Counter()
+    topic_counter = Counter()
+    guest_shows = {}  # Track which shows each guest appears on
+    
+    for show_name, episodes in podcast_data.items():
+        for ep in episodes:
+            title = ep.get('title', '')
+            guest = parse_guest(title)
+            
+            # Count guest appearances
+            if guest and len(guest) > 3:
+                guest_counter[guest] += 1
+                if guest not in guest_shows:
+                    guest_shows[guest] = []
+                if show_name not in guest_shows[guest]:
+                    guest_shows[guest].append(show_name)
+            
+            # Extract and count topics
+            keywords = extract_keywords(title)
+            for kw in keywords:
+                topic_counter[kw] += 1
+    
+    # Find guests on multiple shows (trending)
+    trending_guests = [(guest, shows) for guest, shows in guest_shows.items() if len(shows) >= 2]
+    trending_guests.sort(key=lambda x: len(x[1]), reverse=True)
+    
+    # Find most common topics
+    popular_topics = topic_counter.most_common(10)
+    
+    return trending_guests[:5], popular_topics
+
+def analyze_emerging_topics(news_data):
+    """Find emerging topics that appear infrequently (opportunities to be first)."""
+    topic_counter = Counter()
+    topic_sources = {}
+    
+    for source_name, articles in news_data.items():
+        for article in articles:
+            title = article.get('title', '')
+            keywords = extract_keywords(title)
+            
+            for kw in keywords:
+                topic_counter[kw] += 1
+                if kw not in topic_sources:
+                    topic_sources[kw] = []
+                if source_name not in topic_sources[kw]:
+                    topic_sources[kw].append(source_name)
+    
+    # Find topics mentioned only 1-2 times (emerging/unique)
+    emerging = [(topic, count, topic_sources[topic]) for topic, count in topic_counter.items() if 1 <= count <= 2]
+    emerging.sort(key=lambda x: x[1])
+    
+    return emerging[:10]
+
 def get_summary(entry, max_length=150):
     """Extract and clean episode summary."""
     summary = entry.get('summary', '') or entry.get('description', '')
@@ -377,23 +443,23 @@ def get_gnews_rss(name, domain=None):
 # --- UPDATED SOURCE LISTS ---
 # Multiple fallback URLs for Diary of a CEO for reliability
 # Apple Podcasts ID: 1291423644 - use this to find canonical feed
-#DOAC_FEEDS = [
- #   "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
- #  "https://feeds.megaphone.fm/the-diary-of-a-ceo",
- #   "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
- #   "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
-#]
+DOAC_FEEDS = [
+    "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
+    "https://feeds.megaphone.fm/the-diary-of-a-ceo",
+    "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
+    "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
+]
 
 PODCASTS = {
-    "Diary of a CEO": "https://www.youtube.com/feeds/videos.xml?channel_id=UCnjgxChqYYnyoqO4k_Q1d6Q",  # Multiple fallback URLs available above but YouTube works.
+    "Diary of a CEO": DOAC_FEEDS,  # Multiple fallback URLs
     "Lex Fridman": "https://lexfridman.com/feed/podcast/",
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
-    "All-In": "https://www.youtube.com/feeds/videos.xml?channel_id=UCESLZhusAkFfsNsApnjF_Cg",
+    "All-In": "https://feeds.megaphone.fm/all-in-with-chamath-jason-sacks-friedberg",
     "Acquired": "https://feeds.transistor.fm/acquired",
     "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
     "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",
     "TBPN (Tech Brothers)": "https://feeds.transistor.fm/technology-brother",
-    "How Leaders Lead": "https://www.youtube.com/feeds/videos.xml?channel_id=UCa4HLorpafz21UwJem_OnGg",
+    "How Leaders Lead": "https://feeds.megaphone.fm/how-leaders-lead",
     "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
 }
 
@@ -419,8 +485,7 @@ INDUSTRY_FEEDS = {
 COMPETITOR_FEEDS = {
     "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
     "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
-    "UWM (Updates) [SEC Feed]": "https://data.sec.gov/rss?cik=0001783398&type=3,4,5&exclude=true&count=40",
-    "UWM Releases (Scraped from Y!)": "https://ikcerog.github.io/scrapethis/rss.xml"
+    "UWM (Updates)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
 }
 
 # Expand/Collapse callbacks - DEFINED OUTSIDE TAB CONTEXT
@@ -435,6 +500,9 @@ def expand_podcasts():
 
 def collapse_podcasts():
     st.session_state.expand_podcasts = False
+
+def toggle_trends():
+    st.session_state.show_trends = not st.session_state.show_trends
 
 # --- DASHBOARD RENDER ---
 data = get_mortgage_data()
@@ -544,66 +612,18 @@ search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 
 
 st.divider()
 
-# --- AGGREGATED SEARCH RESULTS (when filtering) ---
-if search_query:
-    st.markdown('<div class="search-results">', unsafe_allow_html=True)
-    st.subheader(f"🔍 Search Results for '{search_query}'")
-    
-    search_col1, search_col2 = st.columns(2)
-    
-    with search_col1:
-        # Industry News Results
-        st.markdown("**📰 Industry News**")
-        for label, url in INDUSTRY_FEEDS.items():
-            items = fetch_and_filter(url, search_query, limit=3)
-            if items:
-                st.caption(f"_{label}_")
-                for item in items:
-                    st.markdown(f"🔹 [{item.get('title', 'Article')}]({item.get('link', '#')})")
-        
-        # Competitor Results
-        st.markdown("**🏢 Competitors**")
-        for label, url in COMPETITOR_FEEDS.items():
-            items = fetch_and_filter(url, search_query, limit=3)
-            if items:
-                st.caption(f"_{label}_")
-                for item in items:
-                    st.markdown(f"🔹 [{item.get('title', 'News')}]({item.get('link', '#')})")
-    
-    with search_col2:
-        # Journalist Results
-        st.markdown("**🖋️ Journalists**")
-        for name, rss in JOURNALISTS.items():
-            articles = fetch_and_filter(rss, search_query, limit=2)
-            if articles:
-                st.caption(f"_{name}_")
-                for a in articles:
-                    st.markdown(f"📄 [{a.get('title', 'Article')}]({a.get('link', '#')})")
-        
-        # Podcast Results
-        st.markdown("**🎙️ Podcasts**")
-        def fetch_podcast_with_fallback(rss_urls, query):
-            if isinstance(rss_urls, str):
-                return fetch_and_filter(rss_urls, query, limit=2)
-            for url in rss_urls:
-                eps = fetch_and_filter(url, query, limit=2)
-                if eps:
-                    return eps
-            return []
-        
-        for name, rss in PODCASTS.items():
-            eps = fetch_podcast_with_fallback(rss, search_query)
-            if eps:
-                st.caption(f"_{name}_")
-                for e in eps:
-                    guest = parse_guest(e.get('title', ''))
-                    st.markdown(f"🎤 [{guest}]({e.get('link', '#')})")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.divider()
+# --- TRENDS & INSIGHTS BUTTON ---
+col_trends, col_spacer = st.columns([2, 6])
+with col_trends:
+    trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
+    st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
 
 # Reordered tabs: News first (fast), Podcasts last (slow to load)
 tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
+
+# Collect data for trend analysis
+podcast_data = {}
+news_data = {}
 
 # --- TAB 0: Industry News (fastest) ---
 with tabs[0]:
@@ -611,6 +631,7 @@ with tabs[0]:
         st.subheader(label)
         with st.spinner(f"⟳ Loading {label}..."):
             items = fetch_and_filter(url, search_query, limit=4)
+        news_data[label] = items
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
 
@@ -620,6 +641,7 @@ with tabs[1]:
         st.subheader(label)
         with st.spinner(f"⟳ Loading {label}..."):
             items = fetch_and_filter(url, search_query, limit=4)
+        news_data[label] = items
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
 
@@ -640,6 +662,7 @@ with tabs[2]:
             try:
                 with st.spinner("⟳"):
                     articles = fetch_and_filter(rss, search_query)
+                news_data[name] = articles
                 if not articles: st.write("No matches found.")
                 for a in articles:
                     link = a.get('link', '#')
@@ -677,6 +700,7 @@ with tabs[3]:
             try:
                 with st.spinner(f"⟳ Fetching {name}..."):
                     eps = fetch_podcast_with_fallback(rss, search_query)
+                podcast_data[name] = eps
                 if not eps:
                     st.write("No episodes found or feed unavailable.")
                 for e in eps:
@@ -692,5 +716,42 @@ with tabs[3]:
             except:
                 st.error(f"Error loading {name}")
 
+# --- TRENDS & INSIGHTS SECTION ---
+if st.session_state.show_trends and (podcast_data or news_data):
+    st.divider()
+    st.markdown("## 🔥 Trends & Emerging Opportunities")
+    
+    trend_col1, trend_col2 = st.columns(2)
+    
+    with trend_col1:
+        if podcast_data:
+            st.markdown("### 🎙️ **Trending in Podcasts**")
+            trending_guests, popular_topics = analyze_podcast_trends(podcast_data)
+            
+            if trending_guests:
+                st.markdown("**🌟 Guests on Multiple Shows:**")
+                for guest, shows in trending_guests:
+                    shows_str = ", ".join(shows)
+                    st.markdown(f'<div class="trend-badge trending">👤 {guest} <small>({len(shows)} shows)</small></div>', unsafe_allow_html=True)
+                    st.caption(f"   Featured on: {shows_str}")
+            
+            if popular_topics:
+                st.markdown("**📊 Hot Topics:**")
+                for topic, count in popular_topics[:5]:
+                    st.markdown(f'<div class="trend-badge trending">🔥 {topic} <small>({count} mentions)</small></div>', unsafe_allow_html=True)
+    
+    with trend_col2:
+        if news_data:
+            st.markdown("### 💎 **Emerging Opportunities**")
+            emerging_topics = analyze_emerging_topics(news_data)
+            
+            if emerging_topics:
+                st.markdown("**🌱 Unique/Rare Topics** *(be first!)*")
+                for topic, count, sources in emerging_topics[:8]:
+                    sources_str = ", ".join(sources[:2])
+                    st.markdown(f'<div class="trend-badge emerging">💡 {topic} <small>({count}x)</small></div>', unsafe_allow_html=True)
+                    st.caption(f"   Source: {sources_str}")
+            else:
+                st.write("*Load more feeds to discover emerging topics*")
+
 st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")
- 

@@ -80,6 +80,7 @@ st.markdown(f"""
     html, body, [class*="css"], .stApp, * {{
         font-family: 'Saira', sans-serif !important;
     }}
+    button:not([class*="st-emotion-cache"]) { font-family: initial !important; }
     .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: "Saira", sans-serif !important; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}

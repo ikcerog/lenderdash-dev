@@ -42,11 +42,12 @@ if 'expand_podcasts' not in st.session_state:
 THEMES = {
     'light': {
         'bg': '#ffffff',
-        'text': '#000000',
+        'text': '#333333',
         'card_bg': '#f0f0f0',
         'border': '#cccccc',
         'summary': '#555555',
-        'plotly': 'plotly_white'
+        'plotly': 'plotly_white',
+        'link': '#0066cc'
     },
     'dark': {
         'bg': '#0e1117',
@@ -54,7 +55,8 @@ THEMES = {
         'card_bg': '#1e1e1e',
         'border': '#333333',
         'summary': '#aaaaaa',
-        'plotly': 'plotly_dark'
+        'plotly': 'plotly_dark',
+        'link': '#58a6ff'
     },
     'midnight': {
         'bg': '#0a0a12',
@@ -62,7 +64,8 @@ THEMES = {
         'card_bg': '#12121f',
         'border': '#252540',
         'summary': '#8888aa',
-        'plotly': 'plotly_dark'
+        'plotly': 'plotly_dark',
+        'link': '#8ab4f8'
     }
 }
 
@@ -70,7 +73,9 @@ theme = THEMES[st.session_state.theme]
 
 st.markdown(f"""
     <style>
-    .stApp {{ background-color: {theme['bg']}; }}
+    .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; }}
+    .stMarkdown {{ color: {theme['text']}; }}
+    .stMarkdown a {{ color: {theme['link']} !important; }}
     .stMetric {{ background-color: {theme['card_bg']}; padding: 10px; border-radius: 5px; border: 1px solid {theme['border']}; cursor: pointer; transition: opacity 0.2s; }}
     .stMetric:hover {{ opacity: 0.8; }}
     .metric-hidden {{ opacity: 0.4; }}
@@ -93,6 +98,17 @@ st.markdown(f"""
         0% {{ background-position: -200% 0; }}
         100% {{ background-position: 200% 0; }}
     }}
+    .search-results {{
+        background-color: {theme['card_bg']};
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid {theme['border']};
+        margin-bottom: 20px;
+    }}
+    .search-results h3 {{
+        color: {theme['text']};
+        margin-bottom: 15px;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -114,7 +130,7 @@ theme_choice = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-st.title("🏦 Mortgage & Media Command Center")
+st.title("🏦 Dashboard")
 
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)
@@ -239,7 +255,7 @@ def get_rkt_stock_data():
 # --- CONTENT ENGINES (Cached for efficiency) ---
 @st.cache_data(ttl=900)  # Cache RSS feeds for 15 minutes
 def fetch_rss_feed(url):
-    """Fetch and cache RSS feed to minimize network calls."""
+    """Fetch and cache RSS feed to minimize network calls. Preserves original order."""
     try:
         # Enhanced User-Agent to avoid blocking
         feed = feedparser.parse(
@@ -247,21 +263,32 @@ def fetch_rss_feed(url):
             agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
         if feed.entries:
-            # Limit entries stored in cache for memory efficiency
+            # Limit entries stored in cache for memory efficiency, preserve order
             return feed.entries[:MAX_ENTRIES_PER_FEED]
         return []
     except Exception:
         return []
 
 def fetch_and_filter(url, query, limit=8):
-    """Fetch RSS feed (cached) and filter by query. Memory-optimized."""
+    """Fetch RSS feed (cached) and filter by query. Memory-optimized. Preserves order."""
     try:
         entries = fetch_rss_feed(url)
         if not entries:
             return []
+        
+        # If no query, return first N items in original order
         if not query:
-            return entries[:limit]
-        # Memory optimization: only keep essential fields
+            result = []
+            for entry in entries[:limit]:
+                result.append({
+                    'title': entry.get('title', ''),
+                    'link': entry.get('link', '#'),
+                    'published': entry.get('published', ''),
+                    'summary': entry.get('summary', '')
+                })
+            return result
+        
+        # Memory optimization: only keep essential fields, preserve order
         filtered = []
         for entry in entries:
             title = entry.get('title', '').lower()
@@ -376,6 +403,30 @@ JOURNALISTS = {
     "Shaina Mishkin (Barron's)": get_gnews_rss("Shaina Mishkin", "barrons")
 }
 
+INDUSTRY_FEEDS = {
+    "National Mortgage News": "https://www.nationalmortgagenews.com/feed?rss=true",
+    "Mortgage News Daily": "http://www.mortgagenewsdaily.com/rss/news"
+}
+
+COMPETITOR_FEEDS = {
+    "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
+    "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
+    "UWM (Updates)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
+}
+
+# Expand/Collapse callbacks - DEFINED OUTSIDE TAB CONTEXT
+def expand_journalists():
+    st.session_state.expand_journalists = True
+
+def collapse_journalists():
+    st.session_state.expand_journalists = False
+
+def expand_podcasts():
+    st.session_state.expand_podcasts = True
+
+def collapse_podcasts():
+    st.session_state.expand_podcasts = False
+
 # --- DASHBOARD RENDER ---
 data = get_mortgage_data()
 rkt_data = get_rkt_stock_data()
@@ -484,16 +535,70 @@ search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 
 
 st.divider()
 
+# --- AGGREGATED SEARCH RESULTS (when filtering) ---
+if search_query:
+    st.markdown('<div class="search-results">', unsafe_allow_html=True)
+    st.subheader(f"🔍 Search Results for '{search_query}'")
+    
+    search_col1, search_col2 = st.columns(2)
+    
+    with search_col1:
+        # Industry News Results
+        st.markdown("**📰 Industry News**")
+        for label, url in INDUSTRY_FEEDS.items():
+            items = fetch_and_filter(url, search_query, limit=3)
+            if items:
+                st.caption(f"_{label}_")
+                for item in items:
+                    st.markdown(f"🔹 [{item.get('title', 'Article')}]({item.get('link', '#')})")
+        
+        # Competitor Results
+        st.markdown("**🏢 Competitors**")
+        for label, url in COMPETITOR_FEEDS.items():
+            items = fetch_and_filter(url, search_query, limit=3)
+            if items:
+                st.caption(f"_{label}_")
+                for item in items:
+                    st.markdown(f"🔹 [{item.get('title', 'News')}]({item.get('link', '#')})")
+    
+    with search_col2:
+        # Journalist Results
+        st.markdown("**🖋️ Journalists**")
+        for name, rss in JOURNALISTS.items():
+            articles = fetch_and_filter(rss, search_query, limit=2)
+            if articles:
+                st.caption(f"_{name}_")
+                for a in articles:
+                    st.markdown(f"📄 [{a.get('title', 'Article')}]({a.get('link', '#')})")
+        
+        # Podcast Results
+        st.markdown("**🎙️ Podcasts**")
+        def fetch_podcast_with_fallback(rss_urls, query):
+            if isinstance(rss_urls, str):
+                return fetch_and_filter(rss_urls, query, limit=2)
+            for url in rss_urls:
+                eps = fetch_and_filter(url, query, limit=2)
+                if eps:
+                    return eps
+            return []
+        
+        for name, rss in PODCASTS.items():
+            eps = fetch_podcast_with_fallback(rss, search_query)
+            if eps:
+                st.caption(f"_{name}_")
+                for e in eps:
+                    guest = parse_guest(e.get('title', ''))
+                    st.markdown(f"🎤 [{guest}]({e.get('link', '#')})")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.divider()
+
 # Reordered tabs: News first (fast), Podcasts last (slow to load)
 tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 
 # --- TAB 0: Industry News (fastest) ---
 with tabs[0]:
-    industry = {
-        "National Mortgage News": "https://www.nationalmortgagenews.com/feed?rss=true",
-        "Mortgage News Daily": "http://www.mortgagenewsdaily.com/rss/news"
-    }
-    for label, url in industry.items():
+    for label, url in INDUSTRY_FEEDS.items():
         st.subheader(label)
         with st.spinner(f"⟳ Loading {label}..."):
             items = fetch_and_filter(url, search_query, limit=4)
@@ -502,30 +607,12 @@ with tabs[0]:
 
 # --- TAB 1: Competitors ---
 with tabs[1]:
-    comps = {
-        "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
-        "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
-        "UWM (Updates)": "https://feed.businesswire.com/rss/home/company/United+Wholesale+Mortgage%2C+LLC/w6euAGJXjezVpz22AaGCsA=="
-    }
-    for label, url in comps.items():
+    for label, url in COMPETITOR_FEEDS.items():
         st.subheader(label)
         with st.spinner(f"⟳ Loading {label}..."):
             items = fetch_and_filter(url, search_query, limit=4)
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
-
-# Expand/Collapse callbacks
-def expand_journalists():
-    st.session_state.expand_journalists = True
-
-def collapse_journalists():
-    st.session_state.expand_journalists = False
-
-def expand_podcasts():
-    st.session_state.expand_podcasts = True
-
-def collapse_podcasts():
-    st.session_state.expand_podcasts = False
 
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:

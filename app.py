@@ -377,15 +377,15 @@ def get_gnews_rss(name, domain=None):
 # --- UPDATED SOURCE LISTS ---
 # Multiple fallback URLs for Diary of a CEO for reliability
 # Apple Podcasts ID: 1291423644 - use this to find canonical feed
-DOAC_FEEDS = [
-    "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
-    "https://feeds.megaphone.fm/the-diary-of-a-ceo",
-    "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
-    "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
-]
+#DOAC_FEEDS = [
+ #   "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
+ #  "https://feeds.megaphone.fm/the-diary-of-a-ceo",
+ #   "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
+ #   "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
+#]
 
 PODCASTS = {
-    "Diary of a CEO": DOAC_FEEDS,  # Multiple fallback URLs
+    "Diary of a CEO": "https://www.youtube.com/feeds/videos.xml?channel_id=UCnjgxChqYYnyoqO4k_Q1d6Q",  # Multiple fallback URLs available above but YouTube works.
     "Lex Fridman": "https://lexfridman.com/feed/podcast/",
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
     "All-In": "https://feeds.megaphone.fm/all-in-with-chamath-jason-sacks-friedberg",

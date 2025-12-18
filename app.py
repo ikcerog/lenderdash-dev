@@ -73,6 +73,13 @@ theme = THEMES[st.session_state.theme]
 
 st.markdown(f"""
     <style>
+    /* Import Saira font */
+    @import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,100..900;1,100..900&display=swap');
+
+    /* Apply Saira across all Streamlit elements */
+    html, body, [class*="css"], .stApp {{
+        font-family: 'Saira', sans-serif !important;
+    }}
     .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}

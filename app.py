@@ -80,7 +80,7 @@ st.markdown(f"""
     html, body, [class*="css"], .stApp, * {{
         font-family: 'Saira', sans-serif !important;
     }}
-    *[data-testid="stIconMaterial"] {{ 'Material Symbols Rounded' !important; }}
+    *[data-testid="stIconMaterial"] {{ font-family: 'Material Symbols Rounded' !important; }}
     .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: "Saira", sans-serif !important; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}

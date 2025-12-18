@@ -693,3 +693,4 @@ with tabs[3]:
                 st.error(f"Error loading {name}")
 
 st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")
+ 

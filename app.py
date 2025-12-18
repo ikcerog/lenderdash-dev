@@ -170,12 +170,22 @@ def get_rkt_historical_from_sheet():
         date_col = df.columns[0]
         close_col = df.columns[1]
 
-        df[date_col] = pd.to_datetime(df[date_col])
+        # Parse dates and convert to datetime
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         df = df.rename(columns={date_col: 'DATE', close_col: 'RKT'})
         df['RKT'] = pd.to_numeric(df['RKT'], errors='coerce')
+
+        # Remove rows with invalid dates or prices
+        df = df.dropna(subset=['DATE', 'RKT'])
+
+        # Set datetime index
         df = df.set_index('DATE').sort_index()
 
-        return df[['RKT']].dropna()
+        # Verify index is DatetimeIndex
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        return df[['RKT']]
     except Exception as e:
         return pd.DataFrame()
 
@@ -208,15 +218,21 @@ def get_rkt_stock_data():
 
     # Merge historical and live data
     if not historical_df.empty and not live_df.empty:
+        # Ensure both dataframes have datetime indices before merging
+        if not isinstance(historical_df.index, pd.DatetimeIndex):
+            historical_df.index = pd.to_datetime(historical_df.index)
+        if not isinstance(live_df.index, pd.DatetimeIndex):
+            live_df.index = pd.to_datetime(live_df.index)
+
         # Combine: historical data + live data (live overwrites historical for overlapping dates)
         combined = pd.concat([historical_df, live_df])
         combined = combined[~combined.index.duplicated(keep='last')]  # Keep latest for duplicates
         combined = combined.sort_index().tail(MAX_FRED_DAYS)
         return combined
     elif not historical_df.empty:
-        return historical_df.tail(MAX_FRED_DAYS)
+        return historical_df.sort_index().tail(MAX_FRED_DAYS)
     elif not live_df.empty:
-        return live_df.tail(MAX_FRED_DAYS)
+        return live_df.sort_index().tail(MAX_FRED_DAYS)
     else:
         return pd.DataFrame()
 

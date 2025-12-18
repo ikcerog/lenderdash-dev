@@ -456,7 +456,7 @@ PODCASTS = {
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
     "All-In": "https://www.youtube.com/feeds/videos.xml?channel_id=UCESLZhusAkFfsNsApnjF_Cg",
     "Acquired": "https://feeds.transistor.fm/acquired",
-    "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
+    "Pioneers of AI": "https://www.youtube.com/feeds/videos.xml?channel_id=UCsZwYD6b7hse6O9SIclwYEA",
     "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",
     "TBPN (Tech Brothers)": "https://feeds.transistor.fm/technology-brother",
     "How Leaders Lead": "https://www.youtube.com/feeds/videos.xml?channel_id=UCa4HLorpafz21UwJem_OnGg",

@@ -12,9 +12,10 @@ from datetime import datetime, timedelta
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Mortgage & Media Intelligence", layout="wide", initial_sidebar_state="expanded")
 
-# Memory limit: ~500MB max per page load - limit data retention
-MAX_ENTRIES_PER_FEED = 10
-MAX_FRED_DAYS = 365  # Limit FRED data to 1 year for efficiency
+# Memory limit: ~500MB max per page load - aggressive data retention limits
+MAX_ENTRIES_PER_FEED = 8  # Reduced from 10 to save memory
+MAX_FRED_DAYS = 180  # Limit FRED data to 6 months for memory efficiency (reduced from 365)
+MAX_CHART_DISPLAY_DAYS = 90  # Only display last 90 days on chart for better performance
 
 # --- SESSION STATE INITIALIZATION ---
 # Theme persistence (uses query params for cross-page-load persistence)
@@ -97,17 +98,19 @@ st.markdown(f"""
 
 # --- SIDEBAR: Theme Toggle ---
 st.sidebar.title("⚙️ Settings")
+def update_theme():
+    """Callback to update theme without explicit rerun."""
+    st.session_state.theme = st.session_state.theme_selector
+    st.query_params['theme'] = st.session_state.theme_selector
+
 theme_choice = st.sidebar.radio(
     "Theme",
     options=['light', 'dark', 'midnight'],
     index=['light', 'dark', 'midnight'].index(st.session_state.theme),
     horizontal=True,
-    key='theme_selector'
+    key='theme_selector',
+    on_change=update_theme
 )
-if theme_choice != st.session_state.theme:
-    st.session_state.theme = theme_choice
-    st.query_params['theme'] = theme_choice
-    st.rerun()
 
 st.sidebar.markdown("---")
 
@@ -139,25 +142,82 @@ def get_mortgage_data():
     # Limit to last MAX_FRED_DAYS for memory efficiency
     return combined.tail(MAX_FRED_DAYS)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)  # Cache for 24 hours (historical data rarely changes)
+def get_rkt_historical_from_sheet():
+    """
+    Fetch historical RKT stock prices from Google Sheet.
+    To use: Share your Google Sheet as 'Anyone with link can view', then replace the URL below
+    with: https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}
+
+    Expected CSV format:
+    Date,Close
+    2024-01-01,15.23
+    2024-01-02,15.45
+    ...
+    """
+    # TODO: Replace with your Google Sheet CSV export URL
+    SHEET_URL = None  # Example: "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=0"
+
+    if not SHEET_URL:
+        return pd.DataFrame()
+
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(SHEET_URL, headers=headers, timeout=10)
+        df = pd.read_csv(io.StringIO(r.text))
+
+        # Assume first column is date, second column is close price
+        date_col = df.columns[0]
+        close_col = df.columns[1]
+
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.rename(columns={date_col: 'DATE', close_col: 'RKT'})
+        df['RKT'] = pd.to_numeric(df['RKT'], errors='coerce')
+        df = df.set_index('DATE').sort_index()
+
+        return df[['RKT']].dropna()
+    except Exception as e:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)  # Cache live data for 1 hour
 def get_rkt_stock_data():
-    """Fetch RKT stock price from Alpha Vantage (free API)."""
+    """
+    Fetch RKT stock price from Alpha Vantage API and merge with historical Google Sheet data.
+    Historical data provides the base, API provides recent updates (up to 25/day, throttled to ~1/hour).
+    """
     # Get free API key at: https://www.alphavantage.co/support/#api-key
     API_KEY = "demo"  # Replace with your free Alpha Vantage API key
     headers = {"User-Agent": "Mozilla/5.0"}
+
+    # Fetch historical data from Google Sheet
+    historical_df = get_rkt_historical_from_sheet()
+
+    # Fetch recent live data from API
+    live_df = pd.DataFrame()
     url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=RKT&apikey={API_KEY}&datatype=csv"
     try:
         r = requests.get(url, headers=headers, timeout=10)
-        if "Error" in r.text or "Invalid" in r.text:
-            return pd.DataFrame()
-        df = pd.read_csv(io.StringIO(r.text))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.set_index('timestamp').sort_index()
-        df = df[['close']].rename(columns={'close': 'RKT'})
-        df['RKT'] = pd.to_numeric(df['RKT'], errors='coerce')
-        # Limit to match FRED data range
-        return df.tail(MAX_FRED_DAYS)
+        if "Error" not in r.text and "Invalid" not in r.text:
+            live_df = pd.read_csv(io.StringIO(r.text))
+            live_df['timestamp'] = pd.to_datetime(live_df['timestamp'])
+            live_df = live_df.set_index('timestamp').sort_index()
+            live_df = live_df[['close']].rename(columns={'close': 'RKT'})
+            live_df['RKT'] = pd.to_numeric(live_df['RKT'], errors='coerce')
     except:
+        pass
+
+    # Merge historical and live data
+    if not historical_df.empty and not live_df.empty:
+        # Combine: historical data + live data (live overwrites historical for overlapping dates)
+        combined = pd.concat([historical_df, live_df])
+        combined = combined[~combined.index.duplicated(keep='last')]  # Keep latest for duplicates
+        combined = combined.sort_index().tail(MAX_FRED_DAYS)
+        return combined
+    elif not historical_df.empty:
+        return historical_df.tail(MAX_FRED_DAYS)
+    elif not live_df.empty:
+        return live_df.tail(MAX_FRED_DAYS)
+    else:
         return pd.DataFrame()
 
 # --- CONTENT ENGINES (Cached for efficiency) ---
@@ -178,20 +238,29 @@ def fetch_rss_feed(url):
         return []
 
 def fetch_and_filter(url, query, limit=8):
-    """Fetch RSS feed (cached) and filter by query."""
+    """Fetch RSS feed (cached) and filter by query. Memory-optimized."""
     try:
         entries = fetch_rss_feed(url)
         if not entries:
             return []
         if not query:
             return entries[:limit]
+        # Memory optimization: only keep essential fields
         filtered = []
         for entry in entries:
             title = entry.get('title', '').lower()
             summary = entry.get('summary', '').lower()
             if query in title or query in summary:
-                filtered.append(entry)
-        return filtered[:limit]
+                # Only keep fields we actually use
+                filtered.append({
+                    'title': entry.get('title', ''),
+                    'link': entry.get('link', '#'),
+                    'published': entry.get('published', ''),
+                    'summary': entry.get('summary', '')
+                })
+                if len(filtered) >= limit:
+                    break
+        return filtered
     except Exception:
         return []
 
@@ -295,6 +364,19 @@ JOURNALISTS = {
 data = get_mortgage_data()
 rkt_data = get_rkt_stock_data()
 
+# Toggle callbacks to avoid explicit reruns
+def toggle_30y():
+    st.session_state.show_30y = not st.session_state.show_30y
+
+def toggle_15y():
+    st.session_state.show_15y = not st.session_state.show_15y
+
+def toggle_10y():
+    st.session_state.show_10y = not st.session_state.show_10y
+
+def toggle_rkt():
+    st.session_state.show_rkt = not st.session_state.show_rkt
+
 if not data.empty:
     curr, prev = data.iloc[-1], data.iloc[-2]
 
@@ -304,63 +386,82 @@ if not data.empty:
 
     with m1:
         label_30y = "30Y Fixed" + (" ✓" if st.session_state.show_30y else " ○")
-        if st.button(f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)", key="btn_30y", use_container_width=True):
-            st.session_state.show_30y = not st.session_state.show_30y
-            st.rerun()
+        st.button(
+            f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)",
+            key="btn_30y",
+            use_container_width=True,
+            on_click=toggle_30y
+        )
 
     with m2:
         label_15y = "15Y Fixed" + (" ✓" if st.session_state.show_15y else " ○")
-        if st.button(f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)", key="btn_15y", use_container_width=True):
-            st.session_state.show_15y = not st.session_state.show_15y
-            st.rerun()
+        st.button(
+            f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)",
+            key="btn_15y",
+            use_container_width=True,
+            on_click=toggle_15y
+        )
 
     with m3:
         label_10y = "10Y Treasury" + (" ✓" if st.session_state.show_10y else " ○")
-        if st.button(f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)", key="btn_10y", use_container_width=True):
-            st.session_state.show_10y = not st.session_state.show_10y
-            st.rerun()
+        st.button(
+            f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)",
+            key="btn_10y",
+            use_container_width=True,
+            on_click=toggle_10y
+        )
 
     with m4:
         label_rkt = "RKT" + (" ✓" if st.session_state.show_rkt else " ○")
         if not rkt_data.empty and len(rkt_data) >= 2:
             rkt_curr, rkt_prev = rkt_data.iloc[-1]['RKT'], rkt_data.iloc[-2]['RKT']
-            if st.button(f"**{label_rkt}**\n\n${rkt_curr:.2f} ({rkt_curr - rkt_prev:+.2f})", key="btn_rkt", use_container_width=True):
-                st.session_state.show_rkt = not st.session_state.show_rkt
-                st.rerun()
+            st.button(
+                f"**{label_rkt}**\n\n${rkt_curr:.2f} ({rkt_curr - rkt_prev:+.2f})",
+                key="btn_rkt",
+                use_container_width=True,
+                on_click=toggle_rkt
+            )
         else:
             st.button(f"**{label_rkt}**\n\nN/A", key="btn_rkt", use_container_width=True, disabled=True)
 
     # Dual-axis chart: Rates (left) + RKT Stock (right)
+    # Limit display to last MAX_CHART_DISPLAY_DAYS for better performance
+    chart_data = data.tail(MAX_CHART_DISPLAY_DAYS)
+    chart_rkt_data = rkt_data.tail(MAX_CHART_DISPLAY_DAYS) if not rkt_data.empty else rkt_data
+
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     # Add rate lines based on visibility state (left y-axis)
     colors = {'30Y Fixed': '#636EFA', '15Y Fixed': '#EF553B', '10Y Treasury': '#00CC96'}
     visibility_map = {'30Y Fixed': st.session_state.show_30y, '15Y Fixed': st.session_state.show_15y, '10Y Treasury': st.session_state.show_10y}
 
-    for col in data.columns:
+    for col in chart_data.columns:
         if visibility_map.get(col, True):
             fig.add_trace(
-                go.Scatter(x=data.index, y=data[col], name=col, line=dict(color=colors.get(col))),
+                go.Scatter(x=chart_data.index, y=chart_data[col], name=col, line=dict(color=colors.get(col))),
                 secondary_y=False
             )
 
     # Add RKT stock (right y-axis) if visible
-    if not rkt_data.empty and st.session_state.show_rkt:
+    if not chart_rkt_data.empty and st.session_state.show_rkt:
         fig.add_trace(
-            go.Scatter(x=rkt_data.index, y=rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
+            go.Scatter(x=chart_rkt_data.index, y=chart_rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
             secondary_y=True
         )
 
     fig.update_layout(
         template=theme['plotly'],
-        height=300,
+        height=280,  # Reduced from 300 for memory efficiency
         margin=dict(l=0, r=0, t=30, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        showlegend=True,
+        hovermode='x unified'  # More efficient hover rendering
     )
     fig.update_yaxes(title_text="Rate (%)", secondary_y=False)
     fig.update_yaxes(title_text="RKT ($)", secondary_y=True)
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Use config to reduce memory footprint
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # --- SEARCH BAR (below chart for visibility) ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()
@@ -397,6 +498,19 @@ with tabs[1]:
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
 
+# Expand/Collapse callbacks
+def expand_journalists():
+    st.session_state.expand_journalists = True
+
+def collapse_journalists():
+    st.session_state.expand_journalists = False
+
+def expand_podcasts():
+    st.session_state.expand_podcasts = True
+
+def collapse_podcasts():
+    st.session_state.expand_podcasts = False
+
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:
     # Header with Expand/Collapse buttons
@@ -404,13 +518,9 @@ with tabs[2]:
     with hdr_col1:
         st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
     with hdr_col2:
-        if st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True):
-            st.session_state.expand_journalists = True
-            st.rerun()
+        st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True, on_click=expand_journalists)
     with hdr_col3:
-        if st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True):
-            st.session_state.expand_journalists = False
-            st.rerun()
+        st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True, on_click=collapse_journalists)
 
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
@@ -444,13 +554,9 @@ with tabs[3]:
     with hdr_col1:
         st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
     with hdr_col2:
-        if st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True):
-            st.session_state.expand_podcasts = True
-            st.rerun()
+        st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True, on_click=expand_podcasts)
     with hdr_col3:
-        if st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True):
-            st.session_state.expand_podcasts = False
-            st.rerun()
+        st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
 
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):

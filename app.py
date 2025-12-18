@@ -419,7 +419,8 @@ INDUSTRY_FEEDS = {
 COMPETITOR_FEEDS = {
     "Rocket Mortgage (HW)": "https://www.housingwire.com/tag/rocket-mortgage/feed/",
     "Rocket Co (Press)": "https://www.rocketcompanies.com/feed/?post_type=press_release",
-    "UWM (Updates) [SEC Feed]": "https://data.sec.gov/rss?cik=0001783398&type=3,4,5&exclude=true&count=40"
+    "UWM (Updates) [SEC Feed]": "https://data.sec.gov/rss?cik=0001783398&type=3,4,5&exclude=true&count=40",
+    "UWM Releases (Scraped from Y!)": "https://ikcerog.github.io/scrapethis/rss.xml"
 }
 
 # Expand/Collapse callbacks - DEFINED OUTSIDE TAB CONTEXT

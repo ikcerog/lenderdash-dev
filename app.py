@@ -77,10 +77,10 @@ st.markdown(f"""
     @import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,100..900;1,100..900&display=swap');
 
     /* Apply Saira across all Streamlit elements */
-    html, body, [class*="css"], .stApp {{
+    html, body, [class*="css"], .stApp, * {{
         font-family: 'Saira', sans-serif !important;
     }}
-    .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; }}
+    .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: "Saira", sans-serif !important; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}
     .stMetric {{ background-color: {theme['card_bg']}; padding: 10px; border-radius: 5px; border: 1px solid {theme['border']}; cursor: pointer; transition: opacity 0.2s; }}

@@ -388,7 +388,7 @@ PODCASTS = {
     "Diary of a CEO": "https://www.youtube.com/feeds/videos.xml?channel_id=UCnjgxChqYYnyoqO4k_Q1d6Q",  # Multiple fallback URLs available above but YouTube works.
     "Lex Fridman": "https://lexfridman.com/feed/podcast/",
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
-    "All-In": "https://feeds.megaphone.fm/all-in-with-chamath-jason-sacks-friedberg",
+    "All-In": "https://www.youtube.com/feeds/videos.xml?channel_id=UCESLZhusAkFfsNsApnjF_Cg",
     "Acquired": "https://feeds.transistor.fm/acquired",
     "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
     "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",

@@ -393,7 +393,7 @@ PODCASTS = {
     "Pioneers of AI": "https://feeds.art19.com/pioneers-of-ai",
     "Lenny's Podcast": "https://www.lennysnewsletter.com/feed",
     "TBPN (Tech Brothers)": "https://feeds.transistor.fm/technology-brother",
-    "How Leaders Lead": "https://feeds.megaphone.fm/how-leaders-lead",
+    "How Leaders Lead": "https://www.youtube.com/feeds/videos.xml?channel_id=UCa4HLorpafz21UwJem_OnGg",
     "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
 }
 

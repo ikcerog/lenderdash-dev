@@ -555,7 +555,7 @@ def toggle_10y():
 def toggle_rkt():
     st.session_state.show_rkt = not st.session_state.show_rkt
 
-if not data.empty:
+if not data.empty and len(data) >= 2:
     curr, prev = data.iloc[-1], data.iloc[-2]
 
     # Metrics row with toggle buttons - click to show/hide on chart
@@ -564,30 +564,39 @@ if not data.empty:
 
     with m1:
         label_30y = "30Y Fixed" + (" ✓" if st.session_state.show_30y else " ○")
-        st.button(
-            f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)",
-            key="btn_30y",
-            use_container_width=True,
-            on_click=toggle_30y
-        )
+        if '30Y Fixed' in data.columns:
+            st.button(
+                f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)",
+                key="btn_30y",
+                use_container_width=True,
+                on_click=toggle_30y
+            )
+        else:
+            st.button(f"**{label_30y}**\n\nN/A", key="btn_30y", use_container_width=True, disabled=True)
 
     with m2:
         label_15y = "15Y Fixed" + (" ✓" if st.session_state.show_15y else " ○")
-        st.button(
-            f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)",
-            key="btn_15y",
-            use_container_width=True,
-            on_click=toggle_15y
-        )
+        if '15Y Fixed' in data.columns:
+            st.button(
+                f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)",
+                key="btn_15y",
+                use_container_width=True,
+                on_click=toggle_15y
+            )
+        else:
+            st.button(f"**{label_15y}**\n\nN/A", key="btn_15y", use_container_width=True, disabled=True)
 
     with m3:
         label_10y = "10Y Treasury" + (" ✓" if st.session_state.show_10y else " ○")
-        st.button(
-            f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)",
-            key="btn_10y",
-            use_container_width=True,
-            on_click=toggle_10y
-        )
+        if '10Y Treasury' in data.columns:
+            st.button(
+                f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)",
+                key="btn_10y",
+                use_container_width=True,
+                on_click=toggle_10y
+            )
+        else:
+            st.button(f"**{label_10y}**\n\nN/A", key="btn_10y", use_container_width=True, disabled=True)
 
     with m4:
         label_rkt = "RKT" + (" ✓" if st.session_state.show_rkt else " ○")

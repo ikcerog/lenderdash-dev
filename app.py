@@ -474,17 +474,8 @@ def get_gnews_rss(name, domain=None):
     return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-US&gl=US&ceid=US:en"
 
 # --- UPDATED SOURCE LISTS ---
-# Multiple fallback URLs for Diary of a CEO for reliability
-# Apple Podcasts ID: 1291423644 - use this to find canonical feed
-#DOAC_FEEDS = [
- #   "https://feeds.megaphone.fm/DOAC8923326653",  # Megaphone feed ID
- #  "https://feeds.megaphone.fm/the-diary-of-a-ceo",
- #   "https://anchor.fm/s/4e480d00/podcast/rss",  # Anchor/Spotify RSS
- #   "https://rss.art19.com/the-diary-of-a-ceo-with-steven-bartlett",
-#]
-
 PODCASTS = {
-    "Diary of a CEO": "https://www.youtube.com/feeds/videos.xml?channel_id=UCnjgxChqYYnyoqO4k_Q1d6Q",  # Multiple fallback URLs available above but YouTube works.
+    "Diary of a CEO": "https://www.youtube.com/feeds/videos.xml?channel_id=UCnjgxChqYYnyoqO4k_Q1d6Q",
     "Lex Fridman": "https://lexfridman.com/feed/podcast/",
     "Tim Ferriss": "https://rss.art19.com/tim-ferriss-show",
     "All-In": "https://www.youtube.com/feeds/videos.xml?channel_id=UCESLZhusAkFfsNsApnjF_Cg",
@@ -496,7 +487,6 @@ PODCASTS = {
     "Leadership Next": "https://feeds.megaphone.fm/fortuneleadershipnext"
 }
 
-# Journalist feeds - using simpler Google News queries for better 2025 results
 JOURNALISTS = {
     "Nick Timiraos (WSJ)": get_gnews_rss("Nick Timiraos", "wsj"),
     "Gina Heeb (WSJ)": get_gnews_rss("Gina Heeb", "wsj"),
@@ -522,7 +512,7 @@ COMPETITOR_FEEDS = {
     "UWM Releases (Scraped from Y!)": "https://ikcerog.github.io/scrapethis/rss.xml"
 }
 
-# Expand/Collapse callbacks - DEFINED OUTSIDE TAB CONTEXT
+# Expand/Collapse callbacks
 def expand_journalists():
     st.session_state.expand_journalists = True
 
@@ -542,7 +532,7 @@ def toggle_trends():
 data = get_mortgage_data()
 rkt_data = get_rkt_stock_data()
 
-# Toggle callbacks to avoid explicit reruns
+# Toggle callbacks
 def toggle_30y():
     st.session_state.show_30y = not st.session_state.show_30y
 
@@ -555,7 +545,7 @@ def toggle_10y():
 def toggle_rkt():
     st.session_state.show_rkt = not st.session_state.show_rkt
 
-if not data.empty:
+if not data.empty and len(data) >= 2:
     curr, prev = data.iloc[-1], data.iloc[-2]
 
     # Metrics row with toggle buttons - click to show/hide on chart
@@ -564,30 +554,39 @@ if not data.empty:
 
     with m1:
         label_30y = "30Y Fixed" + (" ✓" if st.session_state.show_30y else " ○")
-        st.button(
-            f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)",
-            key="btn_30y",
-            use_container_width=True,
-            on_click=toggle_30y
-        )
+        if '30Y Fixed' in data.columns:
+            st.button(
+                f"**{label_30y}**\n\n{curr['30Y Fixed']}% ({round(curr['30Y Fixed']-prev['30Y Fixed'], 3):+}%)",
+                key="btn_30y",
+                use_container_width=True,
+                on_click=toggle_30y
+            )
+        else:
+            st.button(f"**{label_30y}**\n\nN/A", key="btn_30y", use_container_width=True, disabled=True)
 
     with m2:
         label_15y = "15Y Fixed" + (" ✓" if st.session_state.show_15y else " ○")
-        st.button(
-            f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)",
-            key="btn_15y",
-            use_container_width=True,
-            on_click=toggle_15y
-        )
+        if '15Y Fixed' in data.columns:
+            st.button(
+                f"**{label_15y}**\n\n{curr['15Y Fixed']}% ({round(curr['15Y Fixed']-prev['15Y Fixed'], 3):+}%)",
+                key="btn_15y",
+                use_container_width=True,
+                on_click=toggle_15y
+            )
+        else:
+            st.button(f"**{label_15y}**\n\nN/A", key="btn_15y", use_container_width=True, disabled=True)
 
     with m3:
         label_10y = "10Y Treasury" + (" ✓" if st.session_state.show_10y else " ○")
-        st.button(
-            f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)",
-            key="btn_10y",
-            use_container_width=True,
-            on_click=toggle_10y
-        )
+        if '10Y Treasury' in data.columns:
+            st.button(
+                f"**{label_10y}**\n\n{curr['10Y Treasury']}% ({round(curr['10Y Treasury']-prev['10Y Treasury'], 3):+}%)",
+                key="btn_10y",
+                use_container_width=True,
+                on_click=toggle_10y
+            )
+        else:
+            st.button(f"**{label_10y}**\n\nN/A", key="btn_10y", use_container_width=True, disabled=True)
 
     with m4:
         label_rkt = "RKT" + (" ✓" if st.session_state.show_rkt else " ○")
@@ -603,13 +602,11 @@ if not data.empty:
             st.button(f"**{label_rkt}**\n\nN/A", key="btn_rkt", use_container_width=True, disabled=True)
 
     # Dual-axis chart: Rates (left) + RKT Stock (right)
-    # Limit display to last MAX_CHART_DISPLAY_DAYS for better performance
     chart_data = data.tail(MAX_CHART_DISPLAY_DAYS)
     chart_rkt_data = rkt_data.tail(MAX_CHART_DISPLAY_DAYS) if not rkt_data.empty else rkt_data
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Add rate lines based on visibility state (left y-axis)
     colors = {'30Y Fixed': '#636EFA', '15Y Fixed': '#EF553B', '10Y Treasury': '#00CC96'}
     visibility_map = {'30Y Fixed': st.session_state.show_30y, '15Y Fixed': st.session_state.show_15y, '10Y Treasury': st.session_state.show_10y}
 
@@ -620,7 +617,6 @@ if not data.empty:
                 secondary_y=False
             )
 
-    # Add RKT stock (right y-axis) if visible
     if not chart_rkt_data.empty and st.session_state.show_rkt:
         fig.add_trace(
             go.Scatter(x=chart_rkt_data.index, y=chart_rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
@@ -629,19 +625,18 @@ if not data.empty:
 
     fig.update_layout(
         template=theme['plotly'],
-        height=280,  # Reduced from 300 for memory efficiency
+        height=280,
         margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         showlegend=True,
-        hovermode='x unified'  # More efficient hover rendering
+        hovermode='x unified'
     )
     fig.update_yaxes(title_text="Rate (%)", secondary_y=False)
     fig.update_yaxes(title_text="RKT ($)", secondary_y=True)
 
-    # Use config to reduce memory footprint
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# --- SEARCH BAR (below chart for visibility) ---
+# --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()
 
 st.divider()
@@ -651,7 +646,6 @@ podcast_data = {}
 news_data = {}
 
 # Pre-load Industry News and Competitors (for Insights)
-# This ensures data is available before showing the Insights button
 with st.spinner("🔄 Loading feeds for insights..."):
     for label, url in INDUSTRY_FEEDS.items():
         items = fetch_and_filter(url, search_query, limit=4)
@@ -661,24 +655,21 @@ with st.spinner("🔄 Loading feeds for insights..."):
         items = fetch_and_filter(url, search_query, limit=4)
         news_data[label] = items
 
-# Mark feeds as loaded
 st.session_state.feeds_loaded = True
 
-# --- TRENDS & INSIGHTS BUTTON (Only show after feeds are loaded) ---
+# --- TRENDS & INSIGHTS BUTTON ---
 if st.session_state.feeds_loaded:
     col_trends, col_spacer = st.columns([2, 6])
     with col_trends:
         trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
         st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
 
-# Reordered tabs: News first (fast), Podcasts last (slow to load)
 tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 
-# --- TAB 0: Industry News (fastest) ---
+# --- TAB 0: Industry News ---
 with tabs[0]:
     for label, url in INDUSTRY_FEEDS.items():
         st.subheader(label)
-        # Data already loaded, just display
         items = news_data.get(label, [])
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
@@ -687,21 +678,16 @@ with tabs[0]:
 with tabs[1]:
     for label, url in COMPETITOR_FEEDS.items():
         st.subheader(label)
-        # Data already loaded, just display
         items = news_data.get(label, [])
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
 
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:
-    # Loading Alert Bar
     alert_placeholder = st.empty()
-
-    # Set loading state
     st.session_state.journalists_loading = True
     alert_placeholder.info("🔄 Loading journalist feeds...")
 
-    # Header with Expand/Collapse buttons
     hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
     with hdr_col1:
         st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
@@ -729,16 +715,13 @@ with tabs[2]:
                 st.error(f"Error loading {name}")
                 loaded_count += 1
 
-    # Update alert bar after loading completes
     st.session_state.journalists_loading = False
     alert_placeholder.success(f"✅ Loading complete! Loaded {loaded_count}/{total_count} journalist feeds.")
 
-# --- TAB 3: Podcasts (lazy-loaded, slowest) ---
+# --- TAB 3: Podcasts ---
 def fetch_podcast_with_fallback(rss_urls, query):
-    """Try multiple RSS URLs for podcasts with fallback support."""
     if isinstance(rss_urls, str):
         return fetch_and_filter(rss_urls, query)
-    # Try each URL until one works
     for url in rss_urls:
         eps = fetch_and_filter(url, query)
         if eps:
@@ -746,7 +729,6 @@ def fetch_podcast_with_fallback(rss_urls, query):
     return []
 
 with tabs[3]:
-    # Header with Expand/Collapse buttons
     hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
     with hdr_col1:
         st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
@@ -770,7 +752,6 @@ with tabs[3]:
                     title = e.get('title', 'Untitled Episode')
                     guest = parse_guest(title)
                     st.markdown(f"🎤 **{guest}** — [Link]({link})")
-                    # Add summary if available
                     summary = get_summary(e)
                     if summary:
                         st.markdown(f'<div class="episode-summary">{summary}</div>', unsafe_allow_html=True)

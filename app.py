@@ -143,7 +143,8 @@ theme_choice = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-st.title("🏦 STARK")
+st.title("🏦 *S.T.A.R.K.*")
+st.caption("Strategic Trends, Analytics & Real-estate Knowledge")
 
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)

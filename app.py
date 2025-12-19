@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from collections import Counter
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Mortgage & Media Intelligence", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
 
 # Memory limit: ~500MB max per page load - aggressive data retention limits
 MAX_ENTRIES_PER_FEED = 8  # Reduced from 10 to save memory
@@ -82,6 +82,9 @@ theme = THEMES[st.session_state.theme]
 
 st.markdown(f"""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,100..900;1,100..900&display=swap');
+    * {{ font-family: 'Saira', sans-serif !important; }}
+    *[data-testid="stIconMaterial"] {{ font-family: "Material Symbols Rounded" !important; }}
     .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; }}
     .stMarkdown {{ color: {theme['text']}; }}
     .stMarkdown a {{ color: {theme['link']} !important; }}
@@ -140,7 +143,7 @@ theme_choice = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-st.title("🏦 Dashboard")
+st.title("🏦 STARK")
 
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)

@@ -41,6 +41,12 @@ if 'expand_podcasts' not in st.session_state:
 if 'show_trends' not in st.session_state:
     st.session_state.show_trends = False
 
+# Loading states for feeds
+if 'journalists_loading' not in st.session_state:
+    st.session_state.journalists_loading = False
+if 'feeds_loaded' not in st.session_state:
+    st.session_state.feeds_loaded = False
+
 # --- THEME DEFINITIONS ---
 THEMES = {
     'light': {
@@ -257,7 +263,7 @@ def get_rkt_stock_data():
         return pd.DataFrame()
 
 # --- CONTENT ENGINES (Cached for efficiency) ---
-@st.cache_data(ttl=900)  # Cache RSS feeds for 15 minutes
+@st.cache_data(ttl=300)  # Cache RSS feeds for 5 minutes
 def fetch_rss_feed(url):
     """Fetch and cache RSS feed to minimize network calls. Preserves original order."""
     try:
@@ -274,25 +280,47 @@ def fetch_rss_feed(url):
         return []
 
 def fetch_and_filter(url, query, limit=8):
-    """Fetch RSS feed (cached) and filter by query. Memory-optimized. Preserves order."""
+    """Fetch RSS feed (cached) and filter by query. Memory-optimized. Sorted chronologically (newest first)."""
     try:
         entries = fetch_rss_feed(url)
         if not entries:
             return []
-        
-        # If no query, return first N items in original order
+
+        # Helper function to parse published date
+        def parse_date(date_str):
+            """Parse date string to datetime for sorting."""
+            if not date_str:
+                return datetime.min
+            try:
+                # Try common date formats
+                from email.utils import parsedate_to_datetime
+                return parsedate_to_datetime(date_str)
+            except:
+                try:
+                    # Fallback to ISO format
+                    return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                except:
+                    return datetime.min
+
+        # If no query, return first N items sorted by date (newest first)
         if not query:
             result = []
-            for entry in entries[:limit]:
+            for entry in entries:
                 result.append({
                     'title': entry.get('title', ''),
                     'link': entry.get('link', '#'),
                     'published': entry.get('published', ''),
-                    'summary': entry.get('summary', '')
+                    'summary': entry.get('summary', ''),
+                    '_date': parse_date(entry.get('published', ''))
                 })
-            return result
-        
-        # Memory optimization: only keep essential fields, preserve order
+            # Sort by date (newest first)
+            result.sort(key=lambda x: x['_date'], reverse=True)
+            # Remove internal _date field and limit results
+            for item in result:
+                del item['_date']
+            return result[:limit]
+
+        # Memory optimization: only keep essential fields, filter and sort
         filtered = []
         for entry in entries:
             title = entry.get('title', '').lower()
@@ -303,11 +331,16 @@ def fetch_and_filter(url, query, limit=8):
                     'title': entry.get('title', ''),
                     'link': entry.get('link', '#'),
                     'published': entry.get('published', ''),
-                    'summary': entry.get('summary', '')
+                    'summary': entry.get('summary', ''),
+                    '_date': parse_date(entry.get('published', ''))
                 })
-                if len(filtered) >= limit:
-                    break
-        return filtered
+
+        # Sort by date (newest first)
+        filtered.sort(key=lambda x: x['_date'], reverse=True)
+        # Remove internal _date field and limit results
+        for item in filtered:
+            del item['_date']
+        return filtered[:limit]
     except Exception:
         return []
 
@@ -613,26 +646,40 @@ search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 
 
 st.divider()
 
-# --- TRENDS & INSIGHTS BUTTON ---
-col_trends, col_spacer = st.columns([2, 6])
-with col_trends:
-    trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
-    st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
-
-# Reordered tabs: News first (fast), Podcasts last (slow to load)
-tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
-
 # Collect data for trend analysis
 podcast_data = {}
 news_data = {}
+
+# Pre-load Industry News and Competitors (for Insights)
+# This ensures data is available before showing the Insights button
+with st.spinner("🔄 Loading feeds for insights..."):
+    for label, url in INDUSTRY_FEEDS.items():
+        items = fetch_and_filter(url, search_query, limit=4)
+        news_data[label] = items
+
+    for label, url in COMPETITOR_FEEDS.items():
+        items = fetch_and_filter(url, search_query, limit=4)
+        news_data[label] = items
+
+# Mark feeds as loaded
+st.session_state.feeds_loaded = True
+
+# --- TRENDS & INSIGHTS BUTTON (Only show after feeds are loaded) ---
+if st.session_state.feeds_loaded:
+    col_trends, col_spacer = st.columns([2, 6])
+    with col_trends:
+        trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
+        st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
+
+# Reordered tabs: News first (fast), Podcasts last (slow to load)
+tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 
 # --- TAB 0: Industry News (fastest) ---
 with tabs[0]:
     for label, url in INDUSTRY_FEEDS.items():
         st.subheader(label)
-        with st.spinner(f"⟳ Loading {label}..."):
-            items = fetch_and_filter(url, search_query, limit=4)
-        news_data[label] = items
+        # Data already loaded, just display
+        items = news_data.get(label, [])
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'Article')}]({item.get('link', '#')})**")
 
@@ -640,14 +687,20 @@ with tabs[0]:
 with tabs[1]:
     for label, url in COMPETITOR_FEEDS.items():
         st.subheader(label)
-        with st.spinner(f"⟳ Loading {label}..."):
-            items = fetch_and_filter(url, search_query, limit=4)
-        news_data[label] = items
+        # Data already loaded, just display
+        items = news_data.get(label, [])
         for item in items:
             st.markdown(f"🔹 **[{item.get('title', 'News')}]({item.get('link', '#')})**")
 
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:
+    # Loading Alert Bar
+    alert_placeholder = st.empty()
+
+    # Set loading state
+    st.session_state.journalists_loading = True
+    alert_placeholder.info("🔄 Loading journalist feeds...")
+
     # Header with Expand/Collapse buttons
     hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
     with hdr_col1:
@@ -658,12 +711,15 @@ with tabs[2]:
         st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True, on_click=collapse_journalists)
 
     cols = st.columns(2)
+    loaded_count = 0
+    total_count = len(JOURNALISTS)
+
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
         with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
             try:
-                with st.spinner("⟳"):
-                    articles = fetch_and_filter(rss, search_query)
+                articles = fetch_and_filter(rss, search_query)
                 news_data[name] = articles
+                loaded_count += 1
                 if not articles: st.write("No matches found.")
                 for a in articles:
                     link = a.get('link', '#')
@@ -671,6 +727,11 @@ with tabs[2]:
                     st.caption(f"{a.get('published', '')[:16]}")
             except:
                 st.error(f"Error loading {name}")
+                loaded_count += 1
+
+    # Update alert bar after loading completes
+    st.session_state.journalists_loading = False
+    alert_placeholder.success(f"✅ Loading complete! Loaded {loaded_count}/{total_count} journalist feeds.")
 
 # --- TAB 3: Podcasts (lazy-loaded, slowest) ---
 def fetch_podcast_with_fallback(rss_urls, query):

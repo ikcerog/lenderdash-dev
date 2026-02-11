@@ -270,17 +270,20 @@ def get_rkt_stock_data():
 def fetch_rss_feed(url):
     """Fetch and cache RSS feed. Stores only the 4 fields we use — not heavy feedparser objects."""
     try:
-        feed = feedparser.parse(
+        response = requests.get(
             url,
-            agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            timeout=10,
+            headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
         )
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
         if feed.entries:
             return [
                 {
                     'title':     e.get('title', ''),
                     'link':      e.get('link', '#'),
                     'published': e.get('published', ''),
-                    'summary':   (e.get('summary', '') or e.get('description', ''))[:300],
+                    'summary':   (e.get('summary', '') or e.get('description', '') or '')[:300],
                 }
                 for e in feed.entries[:MAX_ENTRIES_PER_FEED]
             ]
@@ -759,7 +762,10 @@ def _podcast_tab(search_q):
                 for name, rss in PODCASTS.items()
             }
             for future in as_completed(future_to_name):
-                pod_data[future_to_name[future]] = future.result() or []
+                try:
+                    pod_data[future_to_name[future]] = future.result() or []
+                except Exception:
+                    pod_data[future_to_name[future]] = []
     st.session_state['podcast_data'] = pod_data
 
     cols = st.columns(2)

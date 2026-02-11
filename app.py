@@ -682,16 +682,6 @@ with st.spinner("🔄 Loading feeds for insights..."):
 
 st.session_state.feeds_loaded = True
 
-# Pre-fetch podcast data before tabs (used for display and insights section)
-with st.spinner("⟳ Fetching podcast feeds..."):
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_name = {
-            executor.submit(fetch_podcast_with_fallback, rss, search_query): name
-            for name, rss in PODCASTS.items()
-        }
-        for future in as_completed(future_to_name):
-            podcast_data[future_to_name[future]] = future.result() or []
-
 @st.fragment
 def _journalist_tab(search_q):
     alert_placeholder = st.empty()
@@ -727,7 +717,7 @@ def _journalist_tab(search_q):
     alert_placeholder.success(f"✅ Loaded {loaded_count}/{total_count} journalist feeds.")
 
 @st.fragment
-def _podcast_tab(pod_data):
+def _podcast_tab(search_q):
     hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
     with hdr_col1:
         st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
@@ -735,6 +725,17 @@ def _podcast_tab(pod_data):
         st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True, on_click=expand_podcasts)
     with hdr_col3:
         st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
+
+    with st.spinner("⟳ Fetching podcast feeds..."):
+        pod_data = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_name = {
+                executor.submit(fetch_podcast_with_fallback, rss, search_q): name
+                for name, rss in PODCASTS.items()
+            }
+            for future in as_completed(future_to_name):
+                pod_data[future_to_name[future]] = future.result() or []
+    st.session_state['podcast_data'] = pod_data
 
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
@@ -780,7 +781,9 @@ with tabs[2]:
 
 # --- TAB 3: Podcasts ---
 with tabs[3]:
-    _podcast_tab(podcast_data)
+    _podcast_tab(search_query)
+
+podcast_data = st.session_state.get('podcast_data', {})
 
 # --- TRENDS & INSIGHTS BUTTON (placed here, below tabs) ---
 col_trends, col_spacer = st.columns([2, 6])

@@ -9,6 +9,7 @@ import re
 import urllib.parse
 from datetime import datetime, timedelta
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
@@ -348,6 +349,22 @@ def fetch_and_filter(url, query, limit=8):
     except Exception:
         return []
 
+def fetch_feeds_concurrently(feed_dict, query, limit=8, max_workers=8):
+    """Fetch multiple RSS feeds in parallel using a thread pool."""
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_label = {
+            executor.submit(fetch_and_filter, url, query, limit): label
+            for label, url in feed_dict.items()
+        }
+        for future in as_completed(future_to_label):
+            label = future_to_label[future]
+            try:
+                results[label] = future.result()
+            except Exception:
+                results[label] = []
+    return results
+
 def parse_guest(title):
     """
     Extract guest name from podcast episode title.
@@ -649,15 +666,10 @@ st.divider()
 podcast_data = {}
 news_data = {}
 
-# Pre-load Industry News and Competitors (for Insights)
+# Pre-load Industry News and Competitors (for Insights) - fetched concurrently
 with st.spinner("🔄 Loading feeds for insights..."):
-    for label, url in INDUSTRY_FEEDS.items():
-        items = fetch_and_filter(url, search_query, limit=4)
-        news_data[label] = items
-
-    for label, url in COMPETITOR_FEEDS.items():
-        items = fetch_and_filter(url, search_query, limit=4)
-        news_data[label] = items
+    all_news_feeds = {**INDUSTRY_FEEDS, **COMPETITOR_FEEDS}
+    news_data.update(fetch_feeds_concurrently(all_news_feeds, search_query, limit=4))
 
 st.session_state.feeds_loaded = True
 
@@ -704,10 +716,12 @@ with tabs[2]:
     loaded_count = 0
     total_count = len(JOURNALISTS)
 
+    journalist_results = fetch_feeds_concurrently(JOURNALISTS, search_query)
+
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
         with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
             try:
-                articles = fetch_and_filter(rss, search_query)
+                articles = journalist_results.get(name, [])
                 news_data[name] = articles
                 loaded_count += 1
                 if not articles: st.write("No matches found.")
@@ -741,13 +755,22 @@ with tabs[3]:
     with hdr_col3:
         st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
 
+    with st.spinner("⟳ Fetching all podcast feeds..."):
+        podcast_prefetch = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_name = {
+                executor.submit(fetch_podcast_with_fallback, rss, search_query): name
+                for name, rss in PODCASTS.items()
+            }
+            for future in as_completed(future_to_name):
+                podcast_prefetch[future_to_name[future]] = future.result() or []
+
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
         col = cols[idx % 2]
         with col.expander(f"🎧 {name}", expanded=st.session_state.expand_podcasts):
             try:
-                with st.spinner(f"⟳ Fetching {name}..."):
-                    eps = fetch_podcast_with_fallback(rss, search_query)
+                eps = podcast_prefetch.get(name, [])
                 podcast_data[name] = eps
                 if not eps:
                     st.write("No episodes found or feed unavailable.")

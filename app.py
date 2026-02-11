@@ -1,8 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import altair as alt
 import feedparser
 import requests
 import io
@@ -58,7 +57,6 @@ THEMES = {
         'card_bg': '#f0f0f0',
         'border': '#cccccc',
         'summary': '#555555',
-        'plotly': 'plotly_white',
         'link': '#0066cc'
     },
     'dark': {
@@ -67,7 +65,6 @@ THEMES = {
         'card_bg': '#1e1e1e',
         'border': '#333333',
         'summary': '#aaaaaa',
-        'plotly': 'plotly_dark',
         'link': '#58a6ff'
     },
     'midnight': {
@@ -76,7 +73,6 @@ THEMES = {
         'card_bg': '#12121f',
         'border': '#252540',
         'summary': '#8888aa',
-        'plotly': 'plotly_dark',
         'link': '#8ab4f8'
     }
 }
@@ -634,40 +630,54 @@ if not data.empty and len(data) >= 2:
         else:
             st.button(f"**{label_rkt}**\n\nN/A", key="btn_rkt", use_container_width=True, disabled=True)
 
-    # Dual-axis chart: Rates (left) + RKT Stock (right)
-    chart_data = data.tail(MAX_CHART_DISPLAY_DAYS)
-    chart_rkt_data = rkt_data.tail(MAX_CHART_DISPLAY_DAYS) if not rkt_data.empty else rkt_data
+    # Dual-axis chart: Rates (left) + RKT Stock (right) — using Altair (already a Streamlit dependency)
+    chart_data = data.tail(MAX_CHART_DISPLAY_DAYS).reset_index()
 
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    rate_cols = [c for c in ['30Y Fixed', '15Y Fixed', '10Y Treasury']
+                 if c in chart_data.columns and {
+                     '30Y Fixed': st.session_state.show_30y,
+                     '15Y Fixed': st.session_state.show_15y,
+                     '10Y Treasury': st.session_state.show_10y,
+                 }[c]]
 
-    colors = {'30Y Fixed': '#636EFA', '15Y Fixed': '#EF553B', '10Y Treasury': '#00CC96'}
-    visibility_map = {'30Y Fixed': st.session_state.show_30y, '15Y Fixed': st.session_state.show_15y, '10Y Treasury': st.session_state.show_10y}
-
-    for col in chart_data.columns:
-        if visibility_map.get(col, True):
-            fig.add_trace(
-                go.Scatter(x=chart_data.index, y=chart_data[col], name=col, line=dict(color=colors.get(col))),
-                secondary_y=False
-            )
-
-    if not chart_rkt_data.empty and st.session_state.show_rkt:
-        fig.add_trace(
-            go.Scatter(x=chart_rkt_data.index, y=chart_rkt_data['RKT'], name='RKT', line=dict(color='#FFA15A', width=2)),
-            secondary_y=True
+    rate_layer = None
+    if rate_cols:
+        rate_df = chart_data[['DATE'] + rate_cols].melt('DATE', var_name='Series', value_name='Rate').dropna()
+        rate_layer = alt.Chart(rate_df).mark_line(strokeWidth=2).encode(
+            x=alt.X('DATE:T', axis=alt.Axis(title='')),
+            y=alt.Y('Rate:Q', axis=alt.Axis(title='Rate (%)')),
+            color=alt.Color('Series:N',
+                scale=alt.Scale(
+                    domain=['30Y Fixed', '15Y Fixed', '10Y Treasury'],
+                    range=['#636EFA', '#EF553B', '#00CC96']
+                ),
+                legend=alt.Legend(orient='bottom', direction='horizontal')
+            ),
+            tooltip=[alt.Tooltip('DATE:T', title='Date'), 'Series:N',
+                     alt.Tooltip('Rate:Q', format='.2f', title='Rate (%)')]
         )
 
-    fig.update_layout(
-        template=theme['plotly'],
-        height=280,
-        margin=dict(l=0, r=0, t=30, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        showlegend=True,
-        hovermode='x unified'
-    )
-    fig.update_yaxes(title_text="Rate (%)", secondary_y=False)
-    fig.update_yaxes(title_text="RKT ($)", secondary_y=True)
+    rkt_layer = None
+    if st.session_state.show_rkt and not rkt_data.empty:
+        rdf = rkt_data.tail(MAX_CHART_DISPLAY_DAYS).reset_index()
+        rdf.columns = ['DATE', 'RKT']
+        rkt_layer = alt.Chart(rdf).mark_line(color='#FFA15A', strokeWidth=2).encode(
+            x=alt.X('DATE:T', axis=alt.Axis(title='')),
+            y=alt.Y('RKT:Q', axis=alt.Axis(title='RKT ($)', orient='right', titleColor='#FFA15A')),
+            tooltip=[alt.Tooltip('DATE:T', title='Date'), alt.Tooltip('RKT:Q', format='.2f', title='RKT ($)')]
+        )
 
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    if rate_layer is not None and rkt_layer is not None:
+        chart = alt.layer(rate_layer, rkt_layer).resolve_scale(y='independent').properties(height=260)
+    elif rate_layer is not None:
+        chart = rate_layer.properties(height=260)
+    elif rkt_layer is not None:
+        chart = rkt_layer.properties(height=260)
+    else:
+        chart = None
+
+    if chart is not None:
+        st.altair_chart(chart, use_container_width=True)
 
 # --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()

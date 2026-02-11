@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -687,13 +688,19 @@ def _journalist_tab(search_q):
     alert_placeholder = st.empty()
     alert_placeholder.info("🔄 Loading journalist feeds...")
 
-    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    hdr_col1, hdr_col2 = st.columns([6, 2])
     with hdr_col1:
         st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
     with hdr_col2:
-        st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True, on_click=expand_journalists)
-    with hdr_col3:
-        st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True, on_click=collapse_journalists)
+        components.html("""<style>
+  .xpbtn{background:transparent;border:1px solid rgba(255,255,255,.25);border-radius:4px;
+         color:rgba(255,255,255,.85);cursor:pointer;font-size:13px;padding:4px 10px;
+         margin:2px;white-space:nowrap}
+  .xpbtn:hover{background:rgba(255,255,255,.1)}
+</style>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=true)">📂 Expand All</button>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=false)">📁 Collapse</button>
+""", height=40)
 
     cols = st.columns(2)
     loaded_count = 0
@@ -701,7 +708,7 @@ def _journalist_tab(search_q):
     journalist_results = fetch_feeds_concurrently(JOURNALISTS, search_q)
 
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
-        with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
+        with cols[idx % 2].expander(f"📰 {name}"):
             try:
                 articles = journalist_results.get(name, [])
                 loaded_count += 1
@@ -718,13 +725,19 @@ def _journalist_tab(search_q):
 
 @st.fragment
 def _podcast_tab(search_q):
-    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    hdr_col1, hdr_col2 = st.columns([6, 2])
     with hdr_col1:
         st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
     with hdr_col2:
-        st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True, on_click=expand_podcasts)
-    with hdr_col3:
-        st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
+        components.html("""<style>
+  .xpbtn{background:transparent;border:1px solid rgba(255,255,255,.25);border-radius:4px;
+         color:rgba(255,255,255,.85);cursor:pointer;font-size:13px;padding:4px 10px;
+         margin:2px;white-space:nowrap}
+  .xpbtn:hover{background:rgba(255,255,255,.1)}
+</style>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=true)">📂 Expand All</button>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=false)">📁 Collapse</button>
+""", height=40)
 
     with st.spinner("⟳ Fetching podcast feeds..."):
         pod_data = {}
@@ -740,7 +753,7 @@ def _podcast_tab(search_q):
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
         col = cols[idx % 2]
-        with col.expander(f"🎧 {name}", expanded=st.session_state.expand_podcasts):
+        with col.expander(f"🎧 {name}"):
             try:
                 eps = pod_data.get(name, [])
                 if not eps:

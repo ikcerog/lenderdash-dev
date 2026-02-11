@@ -11,6 +11,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from email.utils import parsedate_to_datetime
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
@@ -269,18 +270,24 @@ def get_rkt_stock_data():
         return pd.DataFrame()
 
 # --- CONTENT ENGINES (Cached for efficiency) ---
-@st.cache_data(ttl=300)  # Cache RSS feeds for 5 minutes
+@st.cache_data(ttl=600, max_entries=128)  # 10-min cache; slim dicts only to stay well under 512MB
 def fetch_rss_feed(url):
-    """Fetch and cache RSS feed to minimize network calls. Preserves original order."""
+    """Fetch and cache RSS feed. Stores only the 4 fields we use — not heavy feedparser objects."""
     try:
-        # Enhanced User-Agent to avoid blocking
         feed = feedparser.parse(
             url,
             agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
         if feed.entries:
-            # Limit entries stored in cache for memory efficiency, preserve order
-            return feed.entries[:MAX_ENTRIES_PER_FEED]
+            return [
+                {
+                    'title':     e.get('title', ''),
+                    'link':      e.get('link', '#'),
+                    'published': e.get('published', ''),
+                    'summary':   (e.get('summary', '') or e.get('description', ''))[:300],
+                }
+                for e in feed.entries[:MAX_ENTRIES_PER_FEED]
+            ]
         return []
     except Exception:
         return []
@@ -292,18 +299,13 @@ def fetch_and_filter(url, query, limit=8):
         if not entries:
             return []
 
-        # Helper function to parse published date
         def parse_date(date_str):
-            """Parse date string to datetime for sorting."""
             if not date_str:
                 return datetime.min
             try:
-                # Try common date formats
-                from email.utils import parsedate_to_datetime
                 return parsedate_to_datetime(date_str)
             except:
                 try:
-                    # Fallback to ISO format
                     return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 except:
                     return datetime.min

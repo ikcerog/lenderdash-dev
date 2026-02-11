@@ -659,7 +659,7 @@ if not data.empty and len(data) >= 2:
 
     rkt_layer = None
     if st.session_state.show_rkt and not rkt_data.empty:
-        rdf = rkt_data.tail(MAX_CHART_DISPLAY_DAYS).reset_index()
+        rdf = rkt_data[['RKT']].tail(MAX_CHART_DISPLAY_DAYS).reset_index()
         rdf.columns = ['DATE', 'RKT']
         rkt_layer = alt.Chart(rdf).mark_line(color='#FFA15A', strokeWidth=2).encode(
             x=alt.X('DATE:T', axis=alt.Axis(title='')),

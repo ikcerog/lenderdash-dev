@@ -365,6 +365,15 @@ def fetch_feeds_concurrently(feed_dict, query, limit=8, max_workers=8):
                 results[label] = []
     return results
 
+def fetch_podcast_with_fallback(rss_urls, query):
+    if isinstance(rss_urls, str):
+        return fetch_and_filter(rss_urls, query)
+    for url in rss_urls:
+        eps = fetch_and_filter(url, query)
+        if eps:
+            return eps
+    return []
+
 def parse_guest(title):
     """
     Extract guest name from podcast episode title.
@@ -673,12 +682,79 @@ with st.spinner("🔄 Loading feeds for insights..."):
 
 st.session_state.feeds_loaded = True
 
-# --- TRENDS & INSIGHTS BUTTON ---
-if st.session_state.feeds_loaded:
-    col_trends, col_spacer = st.columns([2, 6])
-    with col_trends:
-        trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
-        st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
+# Pre-fetch podcast data before tabs (used for display and insights section)
+with st.spinner("⟳ Fetching podcast feeds..."):
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_name = {
+            executor.submit(fetch_podcast_with_fallback, rss, search_query): name
+            for name, rss in PODCASTS.items()
+        }
+        for future in as_completed(future_to_name):
+            podcast_data[future_to_name[future]] = future.result() or []
+
+@st.fragment
+def _journalist_tab(search_q):
+    alert_placeholder = st.empty()
+    alert_placeholder.info("🔄 Loading journalist feeds...")
+
+    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    with hdr_col1:
+        st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
+    with hdr_col2:
+        st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True, on_click=expand_journalists)
+    with hdr_col3:
+        st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True, on_click=collapse_journalists)
+
+    cols = st.columns(2)
+    loaded_count = 0
+    total_count = len(JOURNALISTS)
+    journalist_results = fetch_feeds_concurrently(JOURNALISTS, search_q)
+
+    for idx, (name, rss) in enumerate(JOURNALISTS.items()):
+        with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
+            try:
+                articles = journalist_results.get(name, [])
+                loaded_count += 1
+                if not articles: st.write("No matches found.")
+                for a in articles:
+                    link = a.get('link', '#')
+                    st.markdown(f"📄 **[{a.get('title', 'Article')}]({link})**")
+                    st.caption(f"{a.get('published', '')[:16]}")
+            except:
+                st.error(f"Error loading {name}")
+                loaded_count += 1
+
+    alert_placeholder.success(f"✅ Loaded {loaded_count}/{total_count} journalist feeds.")
+
+@st.fragment
+def _podcast_tab(pod_data):
+    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
+    with hdr_col1:
+        st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
+    with hdr_col2:
+        st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True, on_click=expand_podcasts)
+    with hdr_col3:
+        st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
+
+    cols = st.columns(2)
+    for idx, (name, rss) in enumerate(PODCASTS.items()):
+        col = cols[idx % 2]
+        with col.expander(f"🎧 {name}", expanded=st.session_state.expand_podcasts):
+            try:
+                eps = pod_data.get(name, [])
+                if not eps:
+                    st.write("No episodes found or feed unavailable.")
+                for e in eps:
+                    link = e.get('link', '#')
+                    title = e.get('title', 'Untitled Episode')
+                    guest = parse_guest(title)
+                    st.markdown(f"🎤 **{guest}** — [Link]({link})")
+                    summary = get_summary(e)
+                    if summary:
+                        st.markdown(f'<div class="episode-summary">{summary}</div>', unsafe_allow_html=True)
+                    st.caption(f"{e.get('published', '')[:16]}")
+            except:
+                st.error(f"Error loading {name}")
 
 tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 
@@ -700,91 +776,17 @@ with tabs[1]:
 
 # --- TAB 2: Journalist Feed ---
 with tabs[2]:
-    alert_placeholder = st.empty()
-    st.session_state.journalists_loading = True
-    alert_placeholder.info("🔄 Loading journalist feeds...")
-
-    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
-    with hdr_col1:
-        st.info("Direct and Search-Aggregated feeds for elite financial reporters.")
-    with hdr_col2:
-        st.button("📂 Expand All", key="expand_journalists_btn", use_container_width=True, on_click=expand_journalists)
-    with hdr_col3:
-        st.button("📁 Collapse", key="collapse_journalists_btn", use_container_width=True, on_click=collapse_journalists)
-
-    cols = st.columns(2)
-    loaded_count = 0
-    total_count = len(JOURNALISTS)
-
-    journalist_results = fetch_feeds_concurrently(JOURNALISTS, search_query)
-
-    for idx, (name, rss) in enumerate(JOURNALISTS.items()):
-        with cols[idx % 2].expander(f"📰 {name}", expanded=st.session_state.expand_journalists):
-            try:
-                articles = journalist_results.get(name, [])
-                news_data[name] = articles
-                loaded_count += 1
-                if not articles: st.write("No matches found.")
-                for a in articles:
-                    link = a.get('link', '#')
-                    st.markdown(f"📄 **[{a.get('title', 'Article')}]({link})**")
-                    st.caption(f"{a.get('published', '')[:16]}")
-            except:
-                st.error(f"Error loading {name}")
-                loaded_count += 1
-
-    st.session_state.journalists_loading = False
-    alert_placeholder.success(f"✅ Loading complete! Loaded {loaded_count}/{total_count} journalist feeds.")
+    _journalist_tab(search_query)
 
 # --- TAB 3: Podcasts ---
-def fetch_podcast_with_fallback(rss_urls, query):
-    if isinstance(rss_urls, str):
-        return fetch_and_filter(rss_urls, query)
-    for url in rss_urls:
-        eps = fetch_and_filter(url, query)
-        if eps:
-            return eps
-    return []
-
 with tabs[3]:
-    hdr_col1, hdr_col2, hdr_col3 = st.columns([6, 1, 1])
-    with hdr_col1:
-        st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
-    with hdr_col2:
-        st.button("📂 Expand All", key="expand_podcasts_btn", use_container_width=True, on_click=expand_podcasts)
-    with hdr_col3:
-        st.button("📁 Collapse", key="collapse_podcasts_btn", use_container_width=True, on_click=collapse_podcasts)
+    _podcast_tab(podcast_data)
 
-    with st.spinner("⟳ Fetching all podcast feeds..."):
-        podcast_prefetch = {}
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_name = {
-                executor.submit(fetch_podcast_with_fallback, rss, search_query): name
-                for name, rss in PODCASTS.items()
-            }
-            for future in as_completed(future_to_name):
-                podcast_prefetch[future_to_name[future]] = future.result() or []
-
-    cols = st.columns(2)
-    for idx, (name, rss) in enumerate(PODCASTS.items()):
-        col = cols[idx % 2]
-        with col.expander(f"🎧 {name}", expanded=st.session_state.expand_podcasts):
-            try:
-                eps = podcast_prefetch.get(name, [])
-                podcast_data[name] = eps
-                if not eps:
-                    st.write("No episodes found or feed unavailable.")
-                for e in eps:
-                    link = e.get('link', '#')
-                    title = e.get('title', 'Untitled Episode')
-                    guest = parse_guest(title)
-                    st.markdown(f"🎤 **{guest}** — [Link]({link})")
-                    summary = get_summary(e)
-                    if summary:
-                        st.markdown(f'<div class="episode-summary">{summary}</div>', unsafe_allow_html=True)
-                    st.caption(f"{e.get('published', '')[:16]}")
-            except:
-                st.error(f"Error loading {name}")
+# --- TRENDS & INSIGHTS BUTTON (placed here, below tabs) ---
+col_trends, col_spacer = st.columns([2, 6])
+with col_trends:
+    trends_label = "🔥 Hide Insights" if st.session_state.show_trends else "🔥 Show Trends & Insights"
+    st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
 
 # --- TRENDS & INSIGHTS SECTION ---
 if st.session_state.show_trends and (podcast_data or news_data):

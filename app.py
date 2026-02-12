@@ -10,9 +10,13 @@ import urllib.parse
 import json
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
+
+APP_VERSION = "2.1"
+APP_VERSION_DATE = "Feb 12, 2026"
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
@@ -1061,4 +1065,9 @@ if st.session_state.show_trends:
             for _tpi, (_tphrase, _tpcnt) in enumerate(_te_phrases):
                 _tpcols[_tpi % 3].caption(f"`{_tphrase}` ({_tpcnt})")
 
-st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")
+_et_now = datetime.now(ZoneInfo("America/New_York"))
+st.sidebar.markdown(
+    f"--- \n**Last Sync:** {_et_now.strftime('%-I:%M:%S %p')} ET"
+    f"\n\n<small style='color:gray;'>`v{APP_VERSION}` · {APP_VERSION_DATE}</small>",
+    unsafe_allow_html=True,
+)

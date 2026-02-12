@@ -270,17 +270,20 @@ def get_rkt_stock_data():
 def fetch_rss_feed(url):
     """Fetch and cache RSS feed. Stores only the 4 fields we use — not heavy feedparser objects."""
     try:
-        feed = feedparser.parse(
+        response = requests.get(
             url,
-            agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            timeout=10,
+            headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
         )
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
         if feed.entries:
             return [
                 {
                     'title':     e.get('title', ''),
                     'link':      e.get('link', '#'),
                     'published': e.get('published', ''),
-                    'summary':   (e.get('summary', '') or e.get('description', ''))[:300],
+                    'summary':   (e.get('summary', '') or e.get('description', '') or '')[:300],
                 }
                 for e in feed.entries[:MAX_ENTRIES_PER_FEED]
             ]
@@ -739,7 +742,7 @@ def _journalist_tab(search_q):
 def _podcast_tab(search_q):
     hdr_col1, hdr_col2 = st.columns([6, 2])
     with hdr_col1:
-        st.info("⚡ Podcast feeds load on-demand. Click a show to fetch episodes.")
+        st.info("⚡ Expand a show and click **Load** to fetch its latest episodes.")
     with hdr_col2:
         components.html("""<style>
   .xpbtn{background:transparent;border:1px solid rgba(255,255,255,.25);border-radius:4px;
@@ -751,36 +754,47 @@ def _podcast_tab(search_q):
 <button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=false)">📁 Collapse</button>
 """, height=40)
 
-    with st.spinner("⟳ Fetching podcast feeds..."):
-        pod_data = {}
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_name = {
-                executor.submit(fetch_podcast_with_fallback, rss, search_q): name
-                for name, rss in PODCASTS.items()
-            }
-            for future in as_completed(future_to_name):
-                pod_data[future_to_name[future]] = future.result() or []
-    st.session_state['podcast_data'] = pod_data
-
     cols = st.columns(2)
     for idx, (name, rss) in enumerate(PODCASTS.items()):
         col = cols[idx % 2]
         with col.expander(f"🎧 {name}"):
-            try:
-                eps = pod_data.get(name, [])
-                if not eps:
-                    st.write("No episodes found or feed unavailable.")
-                for e in eps:
-                    link = e.get('link', '#')
-                    title = e.get('title', 'Untitled Episode')
-                    guest = parse_guest(title)
-                    st.markdown(f"🎤 **{guest}** — [Link]({link})")
-                    summary = get_summary(e)
-                    if summary:
-                        st.markdown(f'<div class="episode-summary">{summary}</div>', unsafe_allow_html=True)
-                    st.caption(f"{e.get('published', '')[:16]}")
-            except:
-                st.error(f"Error loading {name}")
+            key = f"pod_{name}"
+            eps = st.session_state.get(key)  # None = never loaded; [] = loaded but empty
+
+            if eps is None:
+                if st.button("▶ Load episodes", key=f"load_{name}", use_container_width=True):
+                    with st.spinner("Fetching…"):
+                        result = fetch_podcast_with_fallback(rss, '')
+                    st.session_state[key] = result or []
+                    eps = st.session_state[key]
+
+            if eps is not None:
+                display_eps = (
+                    [e for e in eps if search_q in e.get('title', '').lower()
+                     or search_q in e.get('summary', '').lower()]
+                    if search_q else eps
+                )
+                if not display_eps:
+                    st.write("No episodes match your search." if (eps and search_q) else "No episodes found or feed unavailable.")
+                for e in display_eps:
+                    try:
+                        link = e.get('link', '#')
+                        title = e.get('title', 'Untitled Episode')
+                        guest = parse_guest(title)
+                        st.markdown(f"🎤 **{guest}** — [Link]({link})")
+                        summary = get_summary(e)
+                        if summary:
+                            st.markdown(f'<div class="episode-summary">{summary}</div>', unsafe_allow_html=True)
+                        st.caption(f"{e.get('published', '')[:16]}")
+                    except Exception:
+                        pass
+
+    # Expose loaded shows to the Trends section
+    st.session_state['podcast_data'] = {
+        name: st.session_state[f"pod_{name}"]
+        for name in PODCASTS
+        if f"pod_{name}" in st.session_state
+    }
 
 tabs = st.tabs(["🗞️ Industry News", "🏢 Competitors", "🖋️ Journalist Feed", "🎙️ Podcasts"])
 

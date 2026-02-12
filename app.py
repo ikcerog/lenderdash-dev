@@ -7,6 +7,8 @@ import requests
 import io
 import re
 import urllib.parse
+import json
+import os
 from datetime import datetime, timedelta
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -425,6 +427,85 @@ def extract_keywords(text):
     keywords = [w for w in words if len(w) > 3 and w not in stop_words]
     return keywords
 
+# --- JOURNALIST TREND ACCUMULATOR ---
+TREND_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trend_cache.json")
+TREND_WINDOW_DAYS = 30
+TREND_RECENT_DAYS = 14
+
+
+@st.cache_resource
+def get_trend_accumulator():
+    """Process-level singleton loaded from disk on first call.
+    Returns {'articles': [...], 'seen': set(...)}.
+    Mutations by _ingest_articles are durable across reruns (same object reference).
+    """
+    acc = {'articles': [], 'seen': set()}
+    try:
+        if os.path.exists(TREND_CACHE_FILE):
+            with open(TREND_CACHE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            acc['articles'] = data.get('articles', [])
+            acc['seen'] = set(a['link'] for a in acc['articles'])
+    except Exception:
+        pass
+    return acc
+
+
+def _save_trend_cache(acc):
+    """Write articles to disk. Fails silently — ephemeral FS is acceptable."""
+    try:
+        with open(TREND_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'articles': acc['articles']}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _ingest_articles(acc, source_name, raw_entries):
+    """Deduplicate, date-parse, trim to rolling window, and persist.
+
+    raw_entries: list of slim dicts from fetch_rss_feed() — title/link/published/summary.
+    Returns count of new articles added.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=TREND_WINDOW_DAYS)
+    added = 0
+    for entry in raw_entries:
+        link = entry.get('link', '')
+        if not link or link in acc['seen']:
+            continue
+        pub_str = entry.get('published', '')
+        pub_dt = None
+        if pub_str:
+            try:
+                pub_dt = parsedate_to_datetime(pub_str)
+                if pub_dt.tzinfo is not None:
+                    pub_dt = pub_dt.replace(tzinfo=None)
+            except Exception:
+                try:
+                    pub_dt = datetime.fromisoformat(pub_str.replace('Z', ''))
+                except Exception:
+                    pub_dt = None
+        if pub_dt is None:
+            pub_dt = datetime.utcnow()
+        if pub_dt < cutoff:
+            continue
+        acc['seen'].add(link)
+        acc['articles'].append({
+            'title':     entry.get('title', ''),
+            'link':      link,
+            'published': pub_dt.replace(tzinfo=None).isoformat(),
+            'source':    source_name,
+        })
+        added += 1
+    if added:
+        acc['articles'] = [
+            a for a in acc['articles']
+            if datetime.fromisoformat(a['published']) >= cutoff
+        ]
+        acc['seen'] = set(a['link'] for a in acc['articles'])
+        _save_trend_cache(acc)
+    return added
+
+
 def analyze_podcast_trends(podcast_data):
     """Analyze podcast episodes to find trending guests and topics."""
     guest_counter = Counter()
@@ -722,6 +803,16 @@ def _journalist_tab(search_q):
     total_count = len(JOURNALISTS)
     journalist_results = fetch_feeds_concurrently(JOURNALISTS, search_q)
 
+    # Passive ingest: accumulate full (unfiltered) cached feeds into trend corpus
+    try:
+        _acc = get_trend_accumulator()
+        for _jname, _jurl in JOURNALISTS.items():
+            _raw = fetch_rss_feed(_jurl)  # @st.cache_data hit — no extra HTTP cost
+            if _raw:
+                _ingest_articles(_acc, _jname, _raw)
+    except Exception:
+        pass
+
     for idx, (name, rss) in enumerate(JOURNALISTS.items()):
         with cols[idx % 2].expander(f"📰 {name}"):
             try:
@@ -831,41 +922,143 @@ with col_trends:
     st.button(trends_label, key="toggle_trends_btn", use_container_width=True, on_click=toggle_trends)
 
 # --- TRENDS & INSIGHTS SECTION ---
-if st.session_state.show_trends and (podcast_data or news_data):
+if st.session_state.show_trends:
     st.divider()
     st.markdown("## 🔥 Trends & Emerging Opportunities")
-    
-    trend_col1, trend_col2 = st.columns(2)
-    
-    with trend_col1:
-        if podcast_data:
-            st.markdown("### 🎙️ **Trending in Podcasts**")
-            trending_guests, popular_topics = analyze_podcast_trends(podcast_data)
-            
-            if trending_guests:
-                st.markdown("**🌟 Guests on Multiple Shows:**")
-                for guest, shows in trending_guests:
-                    shows_str = ", ".join(shows)
-                    st.markdown(f'<div class="trend-badge trending">👤 {guest} <small>({len(shows)} shows)</small></div>', unsafe_allow_html=True)
-                    st.caption(f"   Featured on: {shows_str}")
-            
-            if popular_topics:
-                st.markdown("**📊 Hot Topics:**")
-                for topic, count in popular_topics[:5]:
-                    st.markdown(f'<div class="trend-badge trending">🔥 {topic} <small>({count} mentions)</small></div>', unsafe_allow_html=True)
-    
-    with trend_col2:
-        if news_data:
-            st.markdown("### 💎 **Emerging Opportunities**")
-            emerging_topics = analyze_emerging_topics(news_data)
-            
-            if emerging_topics:
-                st.markdown("**🌱 Unique/Rare Topics** *(be first!)*")
-                for topic, count, sources in emerging_topics[:8]:
-                    sources_str = ", ".join(sources[:2])
-                    st.markdown(f'<div class="trend-badge emerging">💡 {topic} <small>({count}x)</small></div>', unsafe_allow_html=True)
-                    st.caption(f"   Source: {sources_str}")
+
+    _te_acc = get_trend_accumulator()
+
+    # Refresh button — re-fetches journalist feeds and ingests into the corpus
+    _te_refresh_col, _te_info_col = st.columns([2, 6])
+    with _te_refresh_col:
+        if st.button("🔄 Refresh Insight Data", key="refresh_trend_btn"):
+            with st.spinner("Re-fetching journalist feeds…"):
+                try:
+                    for _rjname, _rjurl in JOURNALISTS.items():
+                        _rjraw = fetch_rss_feed(_rjurl)
+                        if _rjraw:
+                            _ingest_articles(_te_acc, _rjname, _rjraw)
+                except Exception:
+                    pass
+            st.success(f"Updated — {len(_te_acc['articles'])} articles in corpus.")
+
+    _te_articles = _te_acc['articles']
+
+    if not _te_articles:
+        st.info(
+            "No journalist data accumulated yet. "
+            "Open the **Journalist Feed** tab (which passively ingests articles) "
+            "or click **🔄 Refresh Insight Data** above to seed the corpus."
+        )
+    else:
+        # Stat line
+        _te_dates = []
+        for _a in _te_articles:
+            try:
+                _te_dates.append(datetime.fromisoformat(_a['published']))
+            except Exception:
+                pass
+        with _te_info_col:
+            if _te_dates:
+                st.caption(
+                    f"📊 **{len(_te_articles)} articles** from "
+                    f"**{len(set(_a['source'] for _a in _te_articles))} sources** | "
+                    f"{min(_te_dates).strftime('%b %d')} – {max(_te_dates).strftime('%b %d, %Y')}"
+                )
+
+        # Build frequency counters
+        _te_stop = {
+            'the','a','an','and','or','but','in','on','at','to','for','of',
+            'with','is','are','was','were','will','has','have','had','this',
+            'that','these','those','from','by','as','it','its','their',
+            'what','which','who','how','why','when','about','after','before',
+            'been','into','over','than','then','they','them','not','also',
+            'says','said','new','can','could','would','should','may','might',
+            'year','years','week','weeks','month','months','day','days',
+        }
+        _te_rcutoff = datetime.utcnow() - timedelta(days=TREND_RECENT_DAYS)
+        _te_wcutoff = datetime.utcnow() - timedelta(days=7)
+
+        _te_all_w   = Counter()
+        _te_rec_w   = Counter()
+        _te_week_w  = Counter()
+        _te_old_w   = Counter()
+        _te_bigrams = Counter()
+
+        for _ta in _te_articles:
+            try:
+                _ta_pub = datetime.fromisoformat(_ta['published'])
+            except Exception:
+                _ta_pub = datetime.utcnow()
+            _ta_text = re.sub(r'[^a-z0-9\s]', ' ',
+                              (_ta.get('title', '')).lower())
+            _ta_toks = [w for w in _ta_text.split()
+                        if len(w) > 3 and w not in _te_stop]
+            _te_all_w.update(_ta_toks)
+            _te_bigrams.update(
+                f"{_ta_toks[i]} {_ta_toks[i+1]}"
+                for i in range(len(_ta_toks) - 1)
+            )
+            if _ta_pub >= _te_rcutoff:
+                _te_rec_w.update(_ta_toks)
+            if _ta_pub >= _te_wcutoff:
+                _te_week_w.update(_ta_toks)
             else:
-                st.write("*Load more feeds to discover emerging topics*")
+                _te_old_w.update(_ta_toks)
+
+        _te_total_all = max(sum(_te_all_w.values()), 1)
+        _te_total_rec = max(sum(_te_rec_w.values()), 1)
+
+        # Three-column layout
+        _tc1, _tc2, _tc3 = st.columns(3)
+
+        with _tc1:
+            st.markdown("**📌 Dominant Terms**")
+            _te_top = _te_all_w.most_common(12)
+            if _te_top:
+                _te_max = _te_top[0][1]
+                for _tw, _tc in _te_top:
+                    _bar = '▓' * max(1, round((_tc / _te_max) * 10))
+                    st.caption(f"`{_tw}` {_bar} {_tc}")
+
+        with _tc2:
+            st.markdown(f"**📈 Trending (last {TREND_RECENT_DAYS}d)**")
+            _te_spikes = []
+            for _tw, _tr in _te_rec_w.items():
+                if _tr < 2:
+                    continue
+                _ta_cnt = _te_all_w.get(_tw, 1)
+                _ratio = (_tr / _te_total_rec) / (_ta_cnt / _te_total_all)
+                if _ratio >= 1.5:
+                    _te_spikes.append((_tw, _ratio, _tr))
+            _te_spikes.sort(key=lambda x: x[1], reverse=True)
+            if _te_spikes:
+                for _tw, _ratio, _tr in _te_spikes[:10]:
+                    st.caption(f"`{_tw}` ×{_ratio:.1f} ({_tr} recent)")
+            else:
+                st.caption("_Build up more history to see spikes._")
+
+        with _tc3:
+            st.markdown("**🌱 Emerging (new this week)**")
+            _te_emg = [
+                (_tw, _tc) for _tw, _tc in _te_week_w.items()
+                if _tc >= 2 and _tw not in _te_old_w
+            ]
+            _te_emg.sort(key=lambda x: x[1], reverse=True)
+            if _te_emg:
+                for _tw, _tc in _te_emg[:10]:
+                    st.caption(f"`{_tw}` ({_tc})")
+            else:
+                st.caption("_No brand-new terms this week yet._")
+
+        # Recurring phrases
+        if _te_bigrams:
+            st.divider()
+            st.markdown("**🔗 Recurring Phrases**")
+            _te_phrases = _te_bigrams.most_common(15)
+            _tp1, _tp2, _tp3 = st.columns(3)
+            _tpcols = [_tp1, _tp2, _tp3]
+            for _tpi, (_tphrase, _tpcnt) in enumerate(_te_phrases):
+                _tpcols[_tpi % 3].caption(f"`{_tphrase}` ({_tpcnt})")
 
 st.sidebar.markdown(f"--- \n**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")

@@ -417,19 +417,82 @@ def parse_guest(title):
     # Last resort: return truncated title
     return title[:45] + '...' if len(title) > 45 else title
 
+# Comprehensive stop list shared by extract_keywords() and the trend analysis loop.
+# Covers: articles, pronouns, prepositions, conjunctions, auxiliary/common verbs,
+# adverbs/filler, time words, month names, publication name fragments, and
+# generic media/headline noise.
+TREND_STOP = {
+    # Articles / determiners
+    'the','a','an','this','that','these','those','some','any','all',
+    'each','every','both','either','neither','no','such',
+    # Pronouns
+    'i','me','my','we','our','you','your','he','him','his',
+    'she','her','it','its','they','them','their','who','whom','whose',
+    # Prepositions
+    'in','on','at','to','for','of','with','by','from','into','over',
+    'under','above','below','between','among','through','during','before',
+    'after','about','against','along','around','behind','beside','beyond',
+    'despite','except','inside','outside','since','toward','upon','within',
+    'without','amid','across','per','via','onto','off','out','down','up',
+    # Conjunctions
+    'and','or','but','nor','so','yet','although','because','unless',
+    'until','while','whereas','whether','though','even','than','then',
+    # Auxiliary / high-frequency verbs
+    'is','are','was','were','will','be','been','being',
+    'has','have','had','do','does','did','done',
+    'can','could','would','should','may','might','must','shall',
+    'get','got','gets','make','made','makes','take','took','takes',
+    'come','came','comes','go','went','goes','know','knew','knows',
+    'think','thought','say','said','says','see','saw','seen','give',
+    'gave','find','found','use','used','uses','want','wants','need',
+    'needs','keep','kept','call','called','calls','let','show','shows',
+    'put','turn','look','looks','looking','talk','talks','help','helps',
+    'open','opens','move','moves','head','heads','mean','means','work',
+    'works','working','ask','asked','start','started','include','includes',
+    # Adverbs / filler
+    'not','also','just','very','really','well','still','even','only',
+    'now','then','here','there','when','where','why','how','more','most',
+    'less','least','too','back','away','again','once','always','never',
+    'often','soon','ever','rather','quite','almost','finally','simply',
+    'actually','certainly','probably','usually','generally','recently',
+    'currently','already','largely','likely','nearly','widely','roughly',
+    # Common adjective filler
+    'new','old','big','small','high','low','long','short','early','late',
+    'good','great','best','major','key','top','next','last','same',
+    'different','other','another','many','much','few','little','several',
+    'important','global','local','national','federal','public','private',
+    # Time words
+    'today','yesterday','tomorrow','week','weeks','month','months',
+    'year','years','day','days','time','times','ago','earlier','later',
+    'monday','tuesday','wednesday','thursday','friday','saturday','sunday',
+    # Month names (full + abbrev)
+    'january','february','march','april','june','july','august',
+    'september','october','november','december',
+    'jan','feb','mar','apr','jun','jul','aug','sep','oct','nov','dec',
+    # Numbers as words
+    'one','two','three','four','five','six','seven','eight','nine','ten',
+    'first','second','third',
+    # Publication name fragments to scrub
+    'wall','street','journal','wsj','barron','barrons',
+    'bloomberg','reuters','cnbc','forbes','marketwatch','morningstar',
+    'financial','times','post','press',
+    # Generic media / headline noise
+    'news','breaking','update','updates','report','reports','reported',
+    'reporting','podcast','podcasts','episode','episodes','article',
+    'articles','story','stories','read','click','subscribe','watch',
+    'listen','follow','share','says','heres','whats','dont','wont',
+    # Generic business filler that floods headlines
+    'data','plan','plans','part','parts','deal','deals','rate','rates',
+    'number','numbers','billion','million','percent','quarter','quarters',
+    'market','markets','company','companies','business','businesses',
+    'industry','industries','sector','sectors','firm','firms',
+}
+
+
 def extract_keywords(text):
-    """Extract meaningful keywords from text (titles, summaries)."""
-    # Remove common stop words
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were', 'will', 'has', 'have', 'had', 'this', 'that', 'these', 'those', 'from', 'by', 'as', 'it', 'its', 'their', 'what', 'which', 'who', 'how', 'why', 'when'}
-    
-    # Clean and tokenize
-    text = text.lower()
-    text = re.sub(r'[^a-z0-9\s]', ' ', text)
-    words = text.split()
-    
-    # Filter keywords
-    keywords = [w for w in words if len(w) > 3 and w not in stop_words]
-    return keywords
+    """Extract meaningful keywords from text using the shared TREND_STOP list."""
+    text = re.sub(r'[^a-z0-9\s]', ' ', text.lower())
+    return [w for w in text.split() if len(w) > 3 and not w.isdigit() and w not in TREND_STOP]
 
 # --- JOURNALIST TREND ACCUMULATOR ---
 TREND_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trend_cache.json")
@@ -971,15 +1034,6 @@ if st.session_state.show_trends:
                 )
 
         # Build frequency counters
-        _te_stop = {
-            'the','a','an','and','or','but','in','on','at','to','for','of',
-            'with','is','are','was','were','will','has','have','had','this',
-            'that','these','those','from','by','as','it','its','their',
-            'what','which','who','how','why','when','about','after','before',
-            'been','into','over','than','then','they','them','not','also',
-            'says','said','new','can','could','would','should','may','might',
-            'year','years','week','weeks','month','months','day','days',
-        }
         _te_rcutoff = datetime.utcnow() - timedelta(days=TREND_RECENT_DAYS)
         _te_wcutoff = datetime.utcnow() - timedelta(days=7)
 
@@ -996,8 +1050,9 @@ if st.session_state.show_trends:
                 _ta_pub = datetime.utcnow()
             _ta_text = re.sub(r'[^a-z0-9\s]', ' ',
                               (_ta.get('title', '')).lower())
+            # Use shared TREND_STOP; also skip pure numeric tokens (years, counts)
             _ta_toks = [w for w in _ta_text.split()
-                        if len(w) > 3 and w not in _te_stop]
+                        if len(w) > 3 and not w.isdigit() and w not in TREND_STOP]
             _te_all_w.update(_ta_toks)
             _te_bigrams.update(
                 f"{_ta_toks[i]} {_ta_toks[i+1]}"
@@ -1013,23 +1068,37 @@ if st.session_state.show_trends:
         _te_total_all = max(sum(_te_all_w.values()), 1)
         _te_total_rec = max(sum(_te_rec_w.values()), 1)
 
-        # Three-column layout
+        # --- Recurring Phrases (top section — higher signal than single words) ---
+        if _te_bigrams:
+            st.markdown("**🔗 Recurring Phrases**")
+            _te_phrases = _te_bigrams.most_common(18)
+            _tp1, _tp2, _tp3 = st.columns(3)
+            _tpcols = [_tp1, _tp2, _tp3]
+            for _tpi, (_tphrase, _tpcnt) in enumerate(_te_phrases):
+                _tpcols[_tpi % 3].caption(f"`{_tphrase}` ({_tpcnt})")
+
+        st.divider()
+
+        # --- Three-column single-word breakdown ---
         _tc1, _tc2, _tc3 = st.columns(3)
 
         with _tc1:
             st.markdown("**📌 Dominant Terms**")
-            _te_top = _te_all_w.most_common(12)
+            # Require >= 3 hits to surface — cuts one-off noise
+            _te_top = [(w, c) for w, c in _te_all_w.most_common(20) if c >= 3][:12]
             if _te_top:
                 _te_max = _te_top[0][1]
                 for _tw, _tc in _te_top:
                     _bar = '▓' * max(1, round((_tc / _te_max) * 10))
                     st.caption(f"`{_tw}` {_bar} {_tc}")
+            else:
+                st.caption("_Not enough data yet._")
 
         with _tc2:
             st.markdown(f"**📈 Trending (last {TREND_RECENT_DAYS}d)**")
             _te_spikes = []
             for _tw, _tr in _te_rec_w.items():
-                if _tr < 2:
+                if _tr < 3:  # raised from 2 → 3
                     continue
                 _ta_cnt = _te_all_w.get(_tw, 1)
                 _ratio = (_tr / _te_total_rec) / (_ta_cnt / _te_total_all)
@@ -1046,7 +1115,7 @@ if st.session_state.show_trends:
             st.markdown("**🌱 Emerging (new this week)**")
             _te_emg = [
                 (_tw, _tc) for _tw, _tc in _te_week_w.items()
-                if _tc >= 2 and _tw not in _te_old_w
+                if _tc >= 3 and _tw not in _te_old_w  # raised from 2 → 3
             ]
             _te_emg.sort(key=lambda x: x[1], reverse=True)
             if _te_emg:
@@ -1054,16 +1123,6 @@ if st.session_state.show_trends:
                     st.caption(f"`{_tw}` ({_tc})")
             else:
                 st.caption("_No brand-new terms this week yet._")
-
-        # Recurring phrases
-        if _te_bigrams:
-            st.divider()
-            st.markdown("**🔗 Recurring Phrases**")
-            _te_phrases = _te_bigrams.most_common(15)
-            _tp1, _tp2, _tp3 = st.columns(3)
-            _tpcols = [_tp1, _tp2, _tp3]
-            for _tpi, (_tphrase, _tpcnt) in enumerate(_te_phrases):
-                _tpcols[_tpi % 3].caption(f"`{_tphrase}` ({_tpcnt})")
 
 _et_now = datetime.now(ZoneInfo("America/New_York"))
 st.sidebar.markdown(

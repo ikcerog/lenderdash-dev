@@ -1011,6 +1011,14 @@ if st.session_state.show_trends:
 
     _te_articles = _te_acc['articles']
 
+    # --- Podcast episodes for trends (supplements article corpus) ---
+    _te_pod_episodes = []
+    _te_pod_unloaded = [n for n in PODCASTS if st.session_state.get(f"pod_{n}") is None]
+    for _pname in PODCASTS:
+        _peps = st.session_state.get(f"pod_{_pname}")
+        if _peps:
+            _te_pod_episodes.extend(_peps)
+
     if not _te_articles:
         st.info(
             "No journalist data accumulated yet. "
@@ -1032,6 +1040,27 @@ if st.session_state.show_trends:
                     f"**{len(set(_a['source'] for _a in _te_articles))} sources** | "
                     f"{min(_te_dates).strftime('%b %d')} – {max(_te_dates).strftime('%b %d, %Y')}"
                 )
+
+        # Podcast coverage notice
+        _te_pod_ep_count = len(_te_pod_episodes)
+        _te_pod_loaded_n = len(PODCASTS) - len(_te_pod_unloaded)
+        if _te_pod_ep_count:
+            _pod_notice = (
+                f"🎙 **{_te_pod_ep_count} podcast episodes** from "
+                f"**{_te_pod_loaded_n} of {len(PODCASTS)} shows** included in analysis."
+            )
+            if _te_pod_unloaded:
+                _pod_notice += (
+                    f" Open the **Podcasts** tab and click **▶ Load episodes** "
+                    f"to add the remaining {len(_te_pod_unloaded)} show(s)."
+                )
+            st.caption(_pod_notice)
+        else:
+            st.info(
+                "🎙 **Podcast episodes not yet loaded** — their titles, descriptions, and guests "
+                "aren't included in this analysis. Open the **Podcasts** tab and click "
+                "**▶ Load episodes** on each show to include them."
+            )
 
         # Build frequency counters
         _te_rcutoff = datetime.utcnow() - timedelta(days=TREND_RECENT_DAYS)
@@ -1064,6 +1093,40 @@ if st.session_state.show_trends:
                 _te_week_w.update(_ta_toks)
             else:
                 _te_old_w.update(_ta_toks)
+
+        # --- Podcast episodes: feed titles + descriptions + guest names into counters ---
+        for _ep in _te_pod_episodes:
+            _ep_pub_str = _ep.get('published', '')
+            try:
+                _ep_pub = parsedate_to_datetime(_ep_pub_str).replace(tzinfo=None)
+            except Exception:
+                try:
+                    _ep_pub = datetime.fromisoformat(
+                        _ep_pub_str.replace('Z', '+00:00')
+                    ).replace(tzinfo=None)
+                except Exception:
+                    _ep_pub = datetime.utcnow()
+            _ep_guest = parse_guest(_ep.get('title', ''))
+            # Combine title + description/summary + extracted guest name for richer signal
+            _ep_text = ' '.join(filter(None, [
+                _ep.get('title', ''),
+                _ep.get('summary', ''),
+                _ep_guest if _ep_guest and _ep_guest != _ep.get('title', '') else '',
+            ]))
+            _ep_text = re.sub(r'[^a-z0-9\s]', ' ', _ep_text.lower())
+            _ep_toks = [w for w in _ep_text.split()
+                        if len(w) > 3 and not w.isdigit() and w not in TREND_STOP]
+            _te_all_w.update(_ep_toks)
+            _te_bigrams.update(
+                f"{_ep_toks[i]} {_ep_toks[i+1]}"
+                for i in range(len(_ep_toks) - 1)
+            )
+            if _ep_pub >= _te_rcutoff:
+                _te_rec_w.update(_ep_toks)
+            if _ep_pub >= _te_wcutoff:
+                _te_week_w.update(_ep_toks)
+            else:
+                _te_old_w.update(_ep_toks)
 
         _te_total_all = max(sum(_te_all_w.values()), 1)
         _te_total_rec = max(sum(_te_rec_w.values()), 1)

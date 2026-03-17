@@ -794,19 +794,20 @@ if not data.empty and len(data) >= 2:
     rate_layer = None
     if rate_cols:
         rate_df = chart_data[['DATE'] + rate_cols].melt('DATE', var_name='Series', value_name='Rate').dropna()
-        rate_layer = alt.Chart(rate_df).mark_line(strokeWidth=2).encode(
-            x=alt.X('DATE:T', axis=alt.Axis(title='')),
-            y=alt.Y('Rate:Q', axis=alt.Axis(title='Rate (%)')),
-            color=alt.Color('Series:N',
-                scale=alt.Scale(
-                    domain=['30Y Fixed', '15Y Fixed', '10Y Treasury'],
-                    range=['#636EFA', '#EF553B', '#00CC96']
+        if not rate_df.empty:
+            rate_layer = alt.Chart(rate_df).mark_line(strokeWidth=2).encode(
+                x=alt.X('DATE:T', axis=alt.Axis(title='')),
+                y=alt.Y('Rate:Q', axis=alt.Axis(title='Rate (%)')),
+                color=alt.Color('Series:N',
+                    scale=alt.Scale(
+                        domain=['30Y Fixed', '15Y Fixed', '10Y Treasury'],
+                        range=['#636EFA', '#EF553B', '#00CC96']
+                    ),
+                    legend=alt.Legend(orient='bottom', direction='horizontal')
                 ),
-                legend=alt.Legend(orient='bottom', direction='horizontal')
-            ),
-            tooltip=[alt.Tooltip('DATE:T', title='Date'), 'Series:N',
-                     alt.Tooltip('Rate:Q', format='.2f', title='Rate (%)')]
-        )
+                tooltip=[alt.Tooltip('DATE:T', title='Date'), 'Series:N',
+                         alt.Tooltip('Rate:Q', format='.2f', title='Rate (%)')]
+            )
 
     rkt_layer = None
     if st.session_state.show_rkt and not rkt_data.empty:
@@ -829,6 +830,27 @@ if not data.empty and len(data) >= 2:
 
     if chart is not None:
         st.altair_chart(chart, use_container_width=True)
+    else:
+        st.info("📊 No chart lines selected. Click the metrics above to show chart data.")
+
+    # Debug info (collapsible)
+    with st.expander("🔍 Chart Debug Info", expanded=False):
+        st.write(f"**Toggle States:**")
+        st.write(f"- 30Y Fixed: {'✓ Visible' if st.session_state.show_30y else '○ Hidden'}")
+        st.write(f"- 15Y Fixed: {'✓ Visible' if st.session_state.show_15y else '○ Hidden'}")
+        st.write(f"- 10Y Treasury: {'✓ Visible' if st.session_state.show_10y else '○ Hidden'}")
+        st.write(f"- RKT Stock: {'✓ Visible' if st.session_state.show_rkt else '○ Hidden'}")
+        st.write(f"\n**Data Status:**")
+        st.write(f"- Rate data rows: {len(chart_data)}")
+        st.write(f"- Rate columns available: {list(chart_data.columns)}")
+        st.write(f"- RKT data rows: {len(rkt_data)}")
+        st.write(f"- Selected rate columns: {rate_cols}")
+        st.write(f"- Rate layer: {'✓ Created' if rate_layer is not None else '✗ None'}")
+        st.write(f"- RKT layer: {'✓ Created' if rkt_layer is not None else '✗ None'}")
+        st.write(f"- Final chart: {'✓ Created' if chart is not None else '✗ None'}")
+else:
+    st.error("❌ Unable to load mortgage rate data. Please refresh the page or check your connection.")
+    st.info("This usually indicates a network issue or the FRED API is temporarily unavailable.")
 
 # --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()

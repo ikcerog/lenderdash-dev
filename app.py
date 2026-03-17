@@ -15,8 +15,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 
-APP_VERSION = "2.1"
-APP_VERSION_DATE = "Feb 12, 2026"
+APP_VERSION = "2.2"
+APP_VERSION_DATE = "Mar 17, 2026"
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")

@@ -15,8 +15,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 
-APP_VERSION = "2.1"
-APP_VERSION_DATE = "Feb 12, 2026"
+APP_VERSION = "2.2"
+APP_VERSION_DATE = "Mar 17, 2026"
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
@@ -154,23 +154,35 @@ st.caption("Strategic Trends, Analytics & Real-estate Knowledge")
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)
 def get_mortgage_data():
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    }
     urls = {
         "30Y Fixed": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US",
         "15Y Fixed": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE15US",
         "10Y Treasury": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
     }
     dfs = []
+    errors = []
     for name, url in urls.items():
         try:
             r = requests.get(url, headers=headers, timeout=10)
+            r.raise_for_status()  # Raise exception for bad status codes
             df = pd.read_csv(io.StringIO(r.text))
             date_col, val_col = df.columns[0], df.columns[1]
             df[date_col] = pd.to_datetime(df[date_col])
             df = df.rename(columns={date_col: 'DATE', val_col: name})
             df[name] = pd.to_numeric(df[name], errors='coerce')
             dfs.append(df.set_index('DATE'))
-        except: continue
+        except Exception as e:
+            errors.append(f"{name}: {str(e)}")
+            continue
+
+    # Store errors in session state for debugging
+    if 'fred_errors' not in st.session_state:
+        st.session_state.fred_errors = []
+    st.session_state.fred_errors = errors
+
     if not dfs:
         return pd.DataFrame()
     combined = pd.concat(dfs, axis=1).ffill().dropna()
@@ -851,6 +863,18 @@ if not data.empty and len(data) >= 2:
 else:
     st.error("❌ Unable to load mortgage rate data. Please refresh the page or check your connection.")
     st.info("This usually indicates a network issue or the FRED API is temporarily unavailable.")
+
+    # Show detailed errors if available
+    if 'fred_errors' in st.session_state and st.session_state.fred_errors:
+        with st.expander("🔍 Detailed Error Information"):
+            st.write("**API Fetch Errors:**")
+            for error in st.session_state.fred_errors:
+                st.code(error)
+            st.write("\n**Possible solutions:**")
+            st.write("- The FRED API may be blocking this server's IP address")
+            st.write("- Try accessing from a different network or location")
+            st.write("- FRED may require API authentication - consider registering for a FRED API key")
+            st.write("- Check if a firewall or proxy is blocking access to fred.stlouisfed.org")
 
 # --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()

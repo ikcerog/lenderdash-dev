@@ -9,6 +9,7 @@ import re
 import urllib.parse
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import Counter
@@ -164,18 +165,33 @@ def get_mortgage_data():
     }
     dfs = []
     errors = []
+
     for name, url in urls.items():
-        try:
-            r = requests.get(url, headers=headers, timeout=10)
-            r.raise_for_status()  # Raise exception for bad status codes
-            df = pd.read_csv(io.StringIO(r.text))
-            date_col, val_col = df.columns[0], df.columns[1]
-            df[date_col] = pd.to_datetime(df[date_col])
-            df = df.rename(columns={date_col: 'DATE', val_col: name})
-            df[name] = pd.to_numeric(df[name], errors='coerce')
-            dfs.append(df.set_index('DATE'))
-        except Exception as e:
-            errors.append(f"{name}: {str(e)}")
+        success = False
+        last_error = None
+
+        # Retry up to 3 times with increasing timeout
+        for attempt in range(3):
+            try:
+                timeout = 15 + (attempt * 15)  # 15s, 30s, 45s
+                r = requests.get(url, headers=headers, timeout=timeout)
+                r.raise_for_status()
+                df = pd.read_csv(io.StringIO(r.text))
+                date_col, val_col = df.columns[0], df.columns[1]
+                df[date_col] = pd.to_datetime(df[date_col])
+                df = df.rename(columns={date_col: 'DATE', val_col: name})
+                df[name] = pd.to_numeric(df[name], errors='coerce')
+                dfs.append(df.set_index('DATE'))
+                success = True
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < 2:  # Don't sleep after last attempt
+                    time.sleep(2 ** attempt)  # 1s, 2s exponential backoff
+                continue
+
+        if not success and last_error:
+            errors.append(f"{name}: {str(last_error)}")
             continue
 
     # Store errors in session state for debugging
@@ -871,10 +887,11 @@ else:
             for error in st.session_state.fred_errors:
                 st.code(error)
             st.write("\n**Possible solutions:**")
-            st.write("- The FRED API may be blocking this server's IP address")
-            st.write("- Try accessing from a different network or location")
-            st.write("- FRED may require API authentication - consider registering for a FRED API key")
-            st.write("- Check if a firewall or proxy is blocking access to fred.stlouisfed.org")
+            st.write("- **Timeout issues**: App now retries 3 times with 15s/30s/45s timeouts")
+            st.write("- **FRED API Key**: Get free key at https://fred.stlouisfed.org/docs/api/api_key.html")
+            st.write("- **Network blocking**: Render's IP may be rate-limited or geo-blocked by FRED")
+            st.write("- **Alternative**: Consider caching FRED data or using a proxy service")
+            st.write("- **Firewall**: Check if proxy/firewall blocks fred.stlouisfed.org")
 
 # --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()

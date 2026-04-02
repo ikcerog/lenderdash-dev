@@ -149,6 +149,9 @@ theme_choice = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
+# Create placeholder for loading state
+loading_placeholder = st.empty()
+
 st.title("🏦 *S.T.A.R.K.*")
 st.caption("Strategic Trends, Analytics & Real-estate Knowledge")
 
@@ -769,8 +772,7 @@ def toggle_trends():
     st.session_state.show_trends = not st.session_state.show_trends
 
 # --- DASHBOARD RENDER ---
-data = get_mortgage_data()
-rkt_data = get_rkt_stock_data()
+# Note: Chart data is fetched later (line ~800) to allow page content to render first
 
 # Toggle callbacks
 def toggle_30y():
@@ -784,6 +786,13 @@ def toggle_10y():
 
 def toggle_rkt():
     st.session_state.show_rkt = not st.session_state.show_rkt
+
+# Fetch chart data with prominent loading indicator
+loading_placeholder.info("📊 **Loading mortgage rates & market data...** This may take a few moments on first load.", icon="⏳")
+with st.spinner("Fetching data from FRED API..."):
+    data = get_mortgage_data()
+    rkt_data = get_rkt_stock_data()
+loading_placeholder.empty()  # Clear loading message once data is loaded
 
 if not data.empty and len(data) >= 2:
     curr, prev = data.iloc[-1], data.iloc[-2]

@@ -970,7 +970,7 @@ def _journalist_tab(search_q):
          margin:2px;white-space:nowrap}
   .xpbtn:hover{background:rgba(255,255,255,.1)}
 </style>
-<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=true)">📂 Expand All</button>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>{if(!d.querySelector('summary')?.textContent?.includes('🔍'))d.open=true})">📂 Expand All</button>
 <button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=false)">📁 Collapse</button>
 """, height=40)
 
@@ -1017,7 +1017,7 @@ def _podcast_tab(search_q):
          margin:2px;white-space:nowrap}
   .xpbtn:hover{background:rgba(255,255,255,.1)}
 </style>
-<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=true)">📂 Expand All</button>
+<button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>{if(!d.querySelector('summary')?.textContent?.includes('🔍'))d.open=true})">📂 Expand All</button>
 <button class="xpbtn" onclick="window.parent.document.querySelectorAll('details').forEach(d=>d.open=false)">📁 Collapse</button>
 """, height=40)
 

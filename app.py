@@ -23,9 +23,10 @@ APP_VERSION_DATE = "Apr 2, 2026"
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
 
 # Memory limit: ~500MB max per page load - aggressive data retention limits
-MAX_ENTRIES_PER_FEED = 8  # Reduced from 10 to save memory
-MAX_FRED_DAYS = 180  # Limit FRED data to 6 months for memory efficiency (reduced from 365)
-MAX_CHART_DISPLAY_DAYS = 90  # Only display last 90 days on chart for better performance
+# --- MEMORY CONFIG (Optimized for Render Free Tier: 512MB RAM) ---
+MAX_ENTRIES_PER_FEED = 6  # Reduced from 8 to minimize memory footprint
+MAX_FRED_DAYS = 90  # Match display days (was 180) - only keep what we show
+MAX_CHART_DISPLAY_DAYS = 90  # Display last 90 days on chart
 
 # --- SESSION STATE INITIALIZATION ---
 # Theme persistence (uses query params for cross-page-load persistence)
@@ -283,7 +284,8 @@ def get_rkt_historical_from_sheet():
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
 
-        return df[['RKT']]
+        # Limit to recent data for memory efficiency
+        return df[['RKT']].tail(MAX_FRED_DAYS * 2)  # 2x buffer for merging with live data
     except Exception as e:
         return pd.DataFrame()
 
@@ -335,7 +337,7 @@ def get_rkt_stock_data():
         return pd.DataFrame()
 
 # --- CONTENT ENGINES (Cached for efficiency) ---
-@st.cache_data(ttl=600, max_entries=128)  # 10-min cache; slim dicts only to stay well under 512MB
+@st.cache_data(ttl=600, max_entries=64)  # 10-min cache, 64 max entries for memory efficiency
 def fetch_rss_feed(url):
     """Fetch and cache RSS feed. Stores only the 4 fields we use — not heavy feedparser objects."""
     try:
@@ -360,7 +362,7 @@ def fetch_rss_feed(url):
     except Exception:
         return []
 
-def fetch_and_filter(url, query, limit=8):
+def fetch_and_filter(url, query, limit=6):
     """Fetch RSS feed (cached) and filter by query. Memory-optimized. Sorted chronologically (newest first)."""
     try:
         entries = fetch_rss_feed(url)
@@ -420,7 +422,7 @@ def fetch_and_filter(url, query, limit=8):
     except Exception:
         return []
 
-def fetch_feeds_concurrently(feed_dict, query, limit=8, max_workers=8):
+def fetch_feeds_concurrently(feed_dict, query, limit=6, max_workers=8):
     """Fetch multiple RSS feeds in parallel using a thread pool."""
     results = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

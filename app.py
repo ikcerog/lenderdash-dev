@@ -16,8 +16,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 
-APP_VERSION = "2.2"
-APP_VERSION_DATE = "Mar 17, 2026"
+APP_VERSION = "2.3"
+APP_VERSION_DATE = "Apr 2, 2026"
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Strategic Trends, Analytics & Real-estate Knowledge", layout="wide", initial_sidebar_state="expanded")
@@ -155,14 +155,29 @@ st.caption("Strategic Trends, Analytics & Real-estate Knowledge")
 # --- FRED DATA ENGINE (Optimized: limit to MAX_FRED_DAYS for <500MB) ---
 @st.cache_data(ttl=3600)
 def get_mortgage_data():
+    # Get FRED API key from environment if available
+    fred_api_key = os.environ.get('FRED_API_KEY', '')
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     }
-    urls = {
-        "30Y Fixed": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US",
-        "15Y Fixed": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE15US",
-        "10Y Treasury": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+
+    # Build URLs with API key if available
+    series_ids = {
+        "30Y Fixed": "MORTGAGE30US",
+        "15Y Fixed": "MORTGAGE15US",
+        "10Y Treasury": "DGS10"
     }
+
+    urls = {}
+    for name, series_id in series_ids.items():
+        if fred_api_key:
+            # Use official API endpoint with key
+            urls[name] = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={fred_api_key}&file_type=json"
+        else:
+            # Use CSV export (no key required, but may be blocked)
+            urls[name] = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+
     dfs = []
     errors = []
 
@@ -176,14 +191,31 @@ def get_mortgage_data():
                 timeout = 15 + (attempt * 15)  # 15s, 30s, 45s
                 r = requests.get(url, headers=headers, timeout=timeout)
                 r.raise_for_status()
-                df = pd.read_csv(io.StringIO(r.text))
-                date_col, val_col = df.columns[0], df.columns[1]
-                df[date_col] = pd.to_datetime(df[date_col])
-                df = df.rename(columns={date_col: 'DATE', val_col: name})
-                df[name] = pd.to_numeric(df[name], errors='coerce')
-                dfs.append(df.set_index('DATE'))
-                success = True
-                break
+
+                # Parse response based on format
+                if fred_api_key:
+                    # JSON API response
+                    data = r.json()
+                    if 'observations' in data:
+                        obs_data = [(o['date'], float(o['value']) if o['value'] != '.' else None)
+                                    for o in data['observations']]
+                        df = pd.DataFrame(obs_data, columns=['DATE', name])
+                        df['DATE'] = pd.to_datetime(df['DATE'])
+                        df[name] = pd.to_numeric(df[name], errors='coerce')
+                        dfs.append(df.set_index('DATE'))
+                        success = True
+                        break
+                else:
+                    # CSV export response
+                    df = pd.read_csv(io.StringIO(r.text))
+                    date_col, val_col = df.columns[0], df.columns[1]
+                    df[date_col] = pd.to_datetime(df[date_col])
+                    df = df.rename(columns={date_col: 'DATE', val_col: name})
+                    df[name] = pd.to_numeric(df[name], errors='coerce')
+                    dfs.append(df.set_index('DATE'))
+                    success = True
+                    break
+
             except Exception as e:
                 last_error = e
                 if attempt < 2:  # Don't sleep after last attempt
@@ -882,16 +914,30 @@ else:
 
     # Show detailed errors if available
     if 'fred_errors' in st.session_state and st.session_state.fred_errors:
-        with st.expander("🔍 Detailed Error Information"):
+        with st.expander("🔍 Detailed Error Information", expanded=True):
             st.write("**API Fetch Errors:**")
             for error in st.session_state.fred_errors:
                 st.code(error)
-            st.write("\n**Possible solutions:**")
-            st.write("- **Timeout issues**: App now retries 3 times with 15s/30s/45s timeouts")
-            st.write("- **FRED API Key**: Get free key at https://fred.stlouisfed.org/docs/api/api_key.html")
-            st.write("- **Network blocking**: Render's IP may be rate-limited or geo-blocked by FRED")
-            st.write("- **Alternative**: Consider caching FRED data or using a proxy service")
-            st.write("- **Firewall**: Check if proxy/firewall blocks fred.stlouisfed.org")
+
+            # Check if API key is configured
+            has_api_key = bool(os.environ.get('FRED_API_KEY'))
+            st.write(f"\n**FRED API Key Status:** {'✅ Configured' if has_api_key else '❌ Not configured'}")
+
+            st.write("\n**How to fix this:**")
+            if not has_api_key:
+                st.warning("**Recommended: Add FRED API Key**")
+                st.write("1. Get free API key: https://fred.stlouisfed.org/docs/api/api_key.html")
+                st.write("2. In Render dashboard → Environment → Add `FRED_API_KEY=your_key_here`")
+                st.write("3. Redeploy the app")
+                st.write("\n**Why this helps:** API key gives priority access and bypasses IP blocks")
+            else:
+                st.write("- API key is configured but still failing - check key validity")
+                st.write("- Visit https://fred.stlouisfed.org/docs/api/api_key.html to verify key")
+
+            st.write("\n**Other possible causes:**")
+            st.write("- Network timeout (app retries 3x with 15s/30s/45s timeouts)")
+            st.write("- Firewall/proxy blocking fred.stlouisfed.org")
+            st.write("- FRED API temporarily down (rare)")
 
 # --- SEARCH BAR ---
 search_query = st.text_input("🔍 Filter across all feeds:", placeholder="e.g. 'Fed', 'Rates', 'Inventory'", key="main_search").lower()
